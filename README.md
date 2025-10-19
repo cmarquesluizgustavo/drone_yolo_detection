@@ -26,9 +26,9 @@ drone_yolo_detection/
 │   └── main.py             # 🚀 CLI interface
 ├── models/
 │   ├── people/
-│   │   └── yolo11n.pt          # 🤖 YOLOv11 model for person detection
+│   │   └── yolo11n.pt      # 🤖 YOLOv11 model for person detection
 │   └── weapons/
-│       └── yolov8guns.pt       # 🔫 YOLOv8 model for weapon detection
+│       └── yolov8guns.pt   # 🔫 YOLOv8 fine-tuned model for weapon detection
 ├── inputs/
 │   ├── raw/                # Original video files (.mp4)
 │   ├── clips/              # Processed video clips
@@ -40,7 +40,8 @@ drone_yolo_detection/
 ├── Dockerfile              # 🐳 Docker configuration
 ├── requirements.txt        # 📦 Python dependencies
 ├── preprocess_videos.py    # 📹 Video preprocessing
-└── README.md              # 📖 This documentation
+├── analyze_metrics.py      # 📊 Metrics analysis and evaluation
+└── README.md               # 📖 This documentation
 ```
 
 ## 🚀 Quick Start
@@ -67,19 +68,18 @@ python src/main.py --input inputs/samples --output output/batch_results
 python src/main.py --confidence 0.6 --weapon-confidence 0.3
 
 # Adjust majority voting (require 3+ frames with weapons to classify sample)
-python src/main.py --majority-threshold 3
+python src/main.py --sample-majority-threshold 3
 
 # Disable weapon detection
 python src/main.py --no-weapons
 
 # Full configuration
 python src/main.py --model models/people/yolo11n.pt \
-                   --weapon-model models/weapons/yolov8guns.pt \
                    --input inputs/samples \
                    --output output/detections \
                    --confidence 0.6 \
                    --weapon-confidence 0.25 \
-                   --majority-threshold 2 \
+                   --sample-majority-threshold 2 \
                    --save-crops
 ```
 
@@ -87,10 +87,9 @@ python src/main.py --model models/people/yolo11n.pt \
 
 ### Command Line Arguments
 - `--model`: Path to YOLO person detection model (default: `models/people/yolo11n.pt`)
-- `--weapon-model`: Path to YOLOv8 weapon model (default: `models/weapons/yolov8guns.pt`)
-- `--input`: Input directory containing image folders (default: `inputs/samples`)
-- `--input_with_weapons`: Input directory with weapon samples (optional, for ground truth)
-- `--input_without_weapons`: Input directory without weapon samples (optional, for ground truth)
+- `--input`: Input directory containing sample folders (default: `inputs/samples`)
+- `--input_with_weapons`: Input directory with weapon samples (optional)
+- `--input_without_weapons`: Input directory without weapon samples (optional)
 - `--output`: Output directory (default: `output/detections`)
 - `--confidence`: Person detection threshold, 0.0-1.0 (default: 0.5)
 - `--weapon-confidence`: Weapon detection threshold, 0.0-1.0 (default: 0.2)
@@ -101,11 +100,12 @@ python src/main.py --model models/people/yolo11n.pt \
 
 ### Configuration File
 Edit `src/config.py` to customize defaults:
-- Confidence thresholds
-- Bounding box colors
+- Model path
+- Confidence threshold
+- Bounding box colors and thickness
 - Supported image formats
-- Output settings
 - Crop padding and minimum size
+- Output folder names
 
 ## 📁 Output Structure
 
