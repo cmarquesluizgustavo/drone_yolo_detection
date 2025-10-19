@@ -6,7 +6,6 @@ Main script to run people detection pipeline.
 import argparse
 import os
 import sys
-import glob
 from pathlib import Path
 
 # Add current directory to path for imports

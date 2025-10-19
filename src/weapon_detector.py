@@ -4,8 +4,6 @@ Detects weapons in cropped person images.
 """
 
 import cv2
-import os
-import numpy as np
 from pathlib import Path
 from ultralytics import YOLO
 

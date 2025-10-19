@@ -2,8 +2,6 @@
 Configuration file for people detection pipeline.
 """
 
-import os
-
 # Model configuration
 MODEL_PATH = "models/yolo11n.pt"
 CONFIDENCE_THRESHOLD = 0.5

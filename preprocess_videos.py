@@ -12,11 +12,9 @@ Parameters:
 - W: Frame sampling interval (extract 1 frame every W frames)
 """
 
-import os
 import cv2
 import argparse
 from pathlib import Path
-import numpy as np
 from typing import Tuple, Dict
 
 # Resolution mapping

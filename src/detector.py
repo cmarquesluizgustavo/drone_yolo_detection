@@ -5,8 +5,6 @@ Processes images and detects people, then detects weapons in person crops.
 
 import cv2
 import os
-import glob
-import numpy as np
 import logging
 from pathlib import Path
 from ultralytics import YOLO
