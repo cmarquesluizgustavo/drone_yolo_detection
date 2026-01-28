@@ -56,7 +56,11 @@ class VideoPreprocessor:
             if p == "None":
                 values.append(None)
             elif re.fullmatch(r'\d+(\.\d+)?', p):
-                values.append(float(p))
+                # Keep as int if no decimal part, otherwise use float
+                if '.' in p:
+                    values.append(float(p))
+                else:
+                    values.append(int(p))
 
         if len(values) > 0:
             distance = values[0]
@@ -114,10 +118,11 @@ class VideoPreprocessor:
         """Extract video clips of specified duration with compression options."""
         video_info = self.get_video_info(video_path)
         video_name = Path(video_path).stem
+        
+        # Extract metadata from filename to check if tilt is missing
         real_distance, camera_height, camera_tilt = self.extract_distance_height_tilt(video_name)
-
-        meta_suffix = f"{real_distance}_{camera_height}_{camera_tilt}"
-
+        # Add _None suffix only if tilt is missing
+        meta_suffix = f"_{camera_tilt}" if camera_tilt is not None else "_None"
         
         print(f"Processing {video_name}:")
         print(f"  Original: {video_info['width']}x{video_info['height']}, {video_info['duration']:.1f}s, {video_info['fps']:.1f} fps")
