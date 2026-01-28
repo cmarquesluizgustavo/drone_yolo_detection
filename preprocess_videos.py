@@ -16,6 +16,7 @@ import cv2
 import argparse
 from pathlib import Path
 from typing import Tuple, Dict
+import re
 
 # Resolution mapping
 RESOLUTIONS = {
@@ -43,6 +44,29 @@ class VideoPreprocessor:
             'compressed': {'crf': 28, 'preset': 'fast'},
             'very_compressed': {'crf': 35, 'preset': 'faster'}
         }
+
+    def extract_distance_height_tilt(self, name: str):
+        """Parse distance_height_tilt from filename."""
+        distance = height = tilt = None
+
+        parts = name.split('_')
+        values = []
+
+        for p in parts:
+            if p == "None":
+                values.append(None)
+            elif re.fullmatch(r'\d+(\.\d+)?', p):
+                values.append(float(p))
+
+        if len(values) > 0:
+            distance = values[0]
+        if len(values) > 1:
+            height = values[1]
+        if len(values) > 2:
+            tilt = values[2]
+
+        return distance, height, tilt
+
     
     def get_video_info(self, video_path: str) -> Dict:
         """Get basic video information."""
@@ -90,6 +114,10 @@ class VideoPreprocessor:
         """Extract video clips of specified duration with compression options."""
         video_info = self.get_video_info(video_path)
         video_name = Path(video_path).stem
+        real_distance, camera_height, camera_tilt = self.extract_distance_height_tilt(video_name)
+
+        meta_suffix = f"{real_distance}_{camera_height}_{camera_tilt}"
+
         
         print(f"Processing {video_name}:")
         print(f"  Original: {video_info['width']}x{video_info['height']}, {video_info['duration']:.1f}s, {video_info['fps']:.1f} fps")
@@ -129,7 +157,7 @@ class VideoPreprocessor:
             # Create descriptive filename with compression and fps info
             fps_suffix = f"_{int(output_fps)}fps" if target_fps and target_fps < original_fps else ""
             bitrate_suffix = f"_{max_bitrate}" if max_bitrate else ""
-            filename = f"{video_name}_clip_{clip_idx:03d}_{target_resolution}_{compression_preset}{fps_suffix}{bitrate_suffix}.mp4"
+            filename = f"{video_name}_{meta_suffix}_clip_{clip_idx:03d}_{target_resolution}_{compression_preset}{fps_suffix}{bitrate_suffix}.mp4"
             output_path = self.clips_dir / filename
             
             # Build ffmpeg command for better compression
