@@ -1,8 +1,9 @@
 """
-YOLOv11 People Detection Pipeline with Weapon Detection
+YOLO People Detection Pipeline with Weapon Detection
 Processes images and detects people, then detects weapons in person crops.
 """
 
+import re
 import cv2
 import os
 import logging
@@ -28,14 +29,11 @@ except ImportError as e:
     WEAPON_DETECTION_AVAILABLE = False
     print(f"Warning: Weapon detection not available. Error: {e}")
 
-
 class DetectionStatistics:
     """Class to track comprehensive detection statistics."""
-    
+
     def __init__(self, sample_majority_threshold=1):
         """
-        Initialize statistics tracker.
-        
         Args:
             sample_majority_threshold: Number of frames with weapon detections 
                                       needed to classify a sample as having weapons
@@ -69,21 +67,14 @@ class DetectionStatistics:
         # Per-sample metrics by class
         self.sample_metrics_by_class = {}  # {'real': {tp, tn, fp, fn}, 'falso': {...}}
         
-        # Legacy single metrics (will be same as frame metrics)
-        self.tp = 0
-        self.tn = 0
-        self.fp = 0
-        self.fn = 0
-        self.accuracy = 0
-        self.prec= 0
-        self.recall = 0
-        self.f1score = 0
-        
         # Distance tracking
         self.distances = []
         self.people_with_distance = 0
+        
         # For RMSE: list of (estimated, real) pairs
-        self.distance_pairs = []
+        self.distance_pairs_pinhole = []
+        self.distance_pairs_tilt = []
+
         # Distance pairs per camera height for RMSE calculation
         self.distance_pairs_by_height = {}  # {2: [(est, real), ...], 5: [...]}
         
@@ -201,32 +192,35 @@ class DetectionStatistics:
                 self.metrics_by_class[sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
             self.metrics_by_class[sample_class][metric_result] += 1
         
-        # Update legacy metrics (same as frame metrics for backward compatibility)
-        self.tp = self.tp_frame
-        self.tn = self.tn_frame
-        self.fp = self.fp_frame
-        self.fn = self.fn_frame
-        
         # Add distance information
         if distances:
             self.distances.extend(distances)
             self.people_with_distance += len(distances)
-        # Add (estimated, real) pairs for RMSE
+        
         if distance_pairs:
-            self.distance_pairs.extend(distance_pairs)
-            # Also track by camera height for RMSE
-            if camera_height is not None:
-                if camera_height not in self.distance_pairs_by_height:
-                    self.distance_pairs_by_height[camera_height] = []
-                self.distance_pairs_by_height[camera_height].extend(distance_pairs)
-    def compute_rmse(self, distance_pairs=None):
-        """Compute RMSE for distance estimation (only where real distance is available)."""
-        pairs = distance_pairs if distance_pairs is not None else self.distance_pairs
-        if not pairs:
+            for est, real, method in distance_pairs:
+                if method == "pinhole":
+                    self.distance_pairs_pinhole.append((est, real))
+                elif method == "tilt":
+                    self.distance_pairs_tilt.append((est, real))
+
+                # group by camera height
+                if camera_height is not None:
+                    if camera_height not in self.distance_pairs_by_height:
+                        self.distance_pairs_by_height[camera_height] = {"pinhole": [], "tilt": []}
+
+                    self.distance_pairs_by_height[camera_height][method].append((est, real))
+
+                
+    def compute_rmse(self, distance_pairs):
+        if not distance_pairs:
             return None
-        diffsq = [(est-real)**2 for est, real in pairs if real is not None]
+
+        diffsq = [(est - real) ** 2 for est, real in distance_pairs if real is not None]
+
         if not diffsq:
             return None
+
         mse = sum(diffsq) / len(diffsq)
         return mse ** 0.5
     
@@ -282,12 +276,6 @@ class DetectionStatistics:
             self.tp_sample, self.tn_sample, self.fp_sample, self.fn_sample
         )
         
-        # Update legacy metrics (frame-level for backward compatibility)
-        self.accuracy = frame_accuracy
-        self.precision = frame_precision
-        self.recall = frame_recall
-        self.f1score = frame_f1score
-        
         return {
             'people_in_images_pct': people_in_images_pct,
             'weapons_in_people_pct': weapons_in_people_pct,
@@ -319,16 +307,6 @@ class DetectionStatistics:
             'tn_sample': self.tn_sample,
             'fp_sample': self.fp_sample,
             'fn_sample': self.fn_sample,
-            
-            # Legacy metrics (same as frame)
-            'accuracy': self.accuracy,
-            'precision': self.precision,
-            'recall': self.recall,
-            'f1score': self.f1score,
-            'tp': self.tp,
-            'tn': self.tn,
-            'fp': self.fp,
-            'fn': self.fn,
             
             'people_with_distance': self.people_with_distance,
             'total_distances': len(self.distances)
@@ -392,18 +370,21 @@ class DetectionStatistics:
             for height in sorted(self.metrics_by_height.keys()):
                 m = self.metrics_by_height[height]
                 acc, prec, rec, f1 = self.calculate_metrics(m['tp'], m['tn'], m['fp'], m['fn'])
-                # Calculate RMSE for this height
-                rmse_height = None
-                if height in self.distance_pairs_by_height:
-                    rmse_height = self.compute_rmse(self.distance_pairs_by_height[height])
                 print(f"   Height: {height}m")
                 print(f"      Accuracy:  {acc:.3f}")
                 print(f"      Precision: {prec:.3f}")
                 print(f"      Recall:    {rec:.3f}")
                 print(f"      F1-Score:  {f1:.3f}")
-                if rmse_height is not None:
-                    print(f"      RMSE:      {rmse_height:.3f}m")
                 print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
+
+                for method in ["pinhole", "tilt"]:
+                    pairs = self.distance_pairs_by_height.get(height, {}).get(method, [])
+                    rmse = self.compute_rmse(pairs)
+
+                    if rmse is not None:
+                        print(f"   {method.upper()} RMSE: {rmse:.3f} m")
+                    else:
+                        print(f"   {method.upper()} RMSE: N/A")
         
         if self.metrics_by_class:
             print(f"\nMETRICS BY CLASS:")
@@ -417,10 +398,14 @@ class DetectionStatistics:
                 print(f"      F1-Score:  {f1:.3f}")
                 print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
         
-        # Print overall RMSE
-        rmse = self.compute_rmse()
-        if rmse is not None:
-            print(f"\nOVERALL DISTANCE ESTIMATION RMSE: {rmse:.3f}m")
+        rmse_pinhole = self.compute_rmse(self.distance_pairs_pinhole)
+        rmse_tilt = self.compute_rmse(self.distance_pairs_tilt)
+
+        print("\nGLOBAL DISTANCE RMSE:")
+        if rmse_pinhole is not None:
+            print(f"   Pinhole Method RMSE: {rmse_pinhole:.3f} m")
+        if rmse_tilt is not None:
+            print(f"   Tilt Method RMSE: {rmse_tilt:.3f} m")
         
         print("\n" + "=" * 60)
         
@@ -458,14 +443,38 @@ class DetectionStatistics:
             print(f"\n   📊 Average weapons per armed person: {avg_weapons_per_person:.1f}")
         '''
 
-        # Print RMSE for distance estimation
-        rmse = self.compute_rmse()
-        if rmse is not None:
-            print(f"\nDistance Estimation RMSE: {rmse:.3f} meters")
-        else:
-            print(f"\nDistance Estimation RMSE: N/A (no ground truth)")
+    def find_best_tilt_by_height_and_distance(self, camera, height, detections, real_distance):
+        best_rmse = float("inf")
+        best_tilt = None
 
-        print("\\n" + "=" * 60)
+        for tilt in range(0, 90):
+            pairs = []
+
+            for det in detections:
+                if "bbox" not in det:
+                    continue
+
+                x1, y1, x2, y2 = det["bbox"]
+                y_bottom = y2
+
+                est = camera.estimate_distance_2(
+                    y_pixel=y_bottom,
+                    camera_tilt_deg=tilt,
+                    camera_height_m=height
+                )
+
+                if est is not None and real_distance is not None:
+                    pairs.append((est, real_distance))
+
+            rmse = self.compute_rmse(pairs)
+
+            if rmse is not None and rmse < best_rmse:
+                best_rmse = rmse
+                best_tilt = tilt
+
+        return best_tilt
+
+
 
 
 class PeopleDetector:
@@ -493,6 +502,12 @@ class PeopleDetector:
         self.weapon_detector = None
         self.enable_weapon_detection = enable_weapon_detection and WEAPON_DETECTION_AVAILABLE
         self.weapon_confidence_threshold = weapon_confidence_threshold
+
+        self.last_tilt = None
+        self.last_height = None
+        self.last_distance = None
+
+
         
         if self.enable_weapon_detection:
             try:
@@ -523,57 +538,47 @@ class PeopleDetector:
             
         except Exception as e:
             print(f"Failed to initialize distance estimation: {e}")
-    
-    def extract_real_distance_from_filename(self, filepath: str):
+
+
+    def extract_distance_height_tilt(self, filepath):
+        """file name format => class_distance_height_tilt_clip_number"""
+
+        distance = height = tilt = None
+
         try:
             dir_path = os.path.dirname(filepath)
             dir_name = os.path.basename(dir_path)
-            
+
             if not dir_name:
                 dir_name = os.path.splitext(os.path.basename(filepath))[0]
+
             parts = dir_name.split('_')
 
-            for i in range(len(parts) - 1):
-                if parts[i + 1].isdigit() and i + 2 < len(parts) and parts[i + 2].isdigit():
-                    distance = float(parts[i + 1])
-                    return distance
-            
-            return None
+            # Find numeric or "None" tokens
+            values = []
+            for p in parts:
+                if p == "None":
+                    values.append(None)
+                elif re.fullmatch(r'\d+(\.\d+)?', p):
+                    values.append(float(p))
+
+            # Assign values safely
+            if len(values) > 0:
+                distance = values[0]
+            if len(values) > 1:
+                height = values[1]
+            if len(values) > 2:
+                tilt = values[2]
+
         except (ValueError, IndexError):
-            return None
-        
-    def extract_camera_height_from_filename(self, filepath: str):
-        """
-        Extracts the camera height from folder name.
-        Pattern: class_distance_height_clip_...
-        Example: falso_05_02_clip_000 -> distance=05, height=02
-        """
-        import re
-        dir_path = os.path.dirname(filepath)
-        dir_name = os.path.basename(dir_path)
-        if not dir_name:
-            dir_name = os.path.splitext(os.path.basename(filepath))[0]
-        numbers = re.findall(r'\d{2,3}', dir_name)
-        # numbers[0] = distance (05), numbers[1] = height (02), numbers[2] = clip number (000)
-        if len(numbers) >= 2:
-            try:
-                height = float(numbers[1])
-                return height
-            except ValueError:
-                pass
-        return None
+            pass
+
+        return distance, height, tilt
+
+
         
     def detect_people(self, image_path: str, draw_boxes: bool = False):
-        """
-        Detect people in a single image.
-        
-        Args:
-            image_path: Path to the input image
-            draw_boxes: Whether to draw boxes on the image (for combined visualization)
-            
-        Returns:
-            tuple: (image_with_boxes, detections_info)
-        """
+        """Detect people in a single image."""
         # Load image
         image = cv2.imread(image_path)
         if image is None:
@@ -581,7 +586,6 @@ class PeopleDetector:
             
         # Run inference - only detect person class (class 0)
         results = self.model(image, imgsz=640, iou=0.6, conf=self.confidence_threshold, classes=[0], verbose=False)
-        
         
         # Process results
         detections_info = []
@@ -600,40 +604,67 @@ class PeopleDetector:
                     if class_id == self.person_class_id and confidence >= self.confidence_threshold:
                         # height pixels
                         person_height_px = y2 - y1
+                        distance_pinhole = self.camera.estimate_distance(person_height_px)
                         
-                        distance_m = None
-                        if self.camera:
-                            try:
-                                distance_m = self.camera.estimate_distance(person_height_px)
-                                
-                                # Extract real distance and camera height from file path
-                                image_name = os.path.basename(image_path)
-                                real_distance_m = self.extract_real_distance_from_filename(image_path)
-                                camera_height_m = self.extract_camera_height_from_filename(image_path)
-                                # Build log message with proper formatting
-                                real_dist_str = f"{real_distance_m:.2f}" if real_distance_m is not None else "N/A"
-                                cam_height_str = f"{camera_height_m:.2f}" if camera_height_m is not None else "N/A"
-                                log_message = (f"Image: {image_name}, Person: {person_idx + 1}, "
-                                             f"PixelHeight: {person_height_px:.1f}px, "
-                                             f"Estimated: {distance_m:.2f}m, "
-                                             f"Real: {real_dist_str}m, "
-                                             f"CameraHeight: {cam_height_str}m, "
-                                             f"Confidence: {confidence:.3f}, "
-                                             f"BBox: [{int(x1)}, {int(y1)}, {int(x2)}, {int(y2)}]")
-                                self.distance_logger.info(log_message)
-                                
-                                # Enhanced console output
-                                console_msg = f"  -> Person {person_idx + 1}: Est:{distance_m:.2f}m"
-                                if real_distance_m is not None:
-                                    console_msg += f", Real:{real_distance_m:.2f}m"
-                                if camera_height_m is not None:
-                                    console_msg += f", CamHeight:{camera_height_m:.2f}m"
-                                console_msg += f", {person_height_px:.1f}px"
-                                print(console_msg)
-                                
-                            except Exception as e:
-                                print(f"Warning: Failed to estimate distance for person {person_idx + 1}: {e}")
+                        # Extract real distance and camera height from file path
+                        real_distance_m, camera_height_m, camera_tilt_deg = self.extract_distance_height_tilt(image_path)
+
+                        y_bottom = y2  # bottom of bounding box
+
+                        distance_tilt = None
+
+                        if camera_height_m is not None and real_distance_m is not None:
+
+                            # If tilt is given in filename → trust it
+                            if camera_tilt_deg is not None:
+                                distance_tilt = self.camera.estimate_distance_2(
+                                    y_pixel=y_bottom,
+                                    camera_tilt_deg=camera_tilt_deg,
+                                    camera_height_m=camera_height_m
+                                )
+
+                            else:
+                                # Recalculate tilt if height OR distance changed
+                                need_recalc = (
+                                    self.last_tilt is None or
+                                    self.last_height != camera_height_m or
+                                    self.last_distance != real_distance_m
+                                )
+
+                                if need_recalc:
+                                    best_tilt = self.stats.find_best_tilt_by_height_and_distance(
+                                        camera=self.camera,
+                                        height=camera_height_m,
+                                        detections=[{
+                                            "bbox": [int(x1), int(y1), int(x2), int(y2)]
+                                        }],
+                                        real_distance=real_distance_m
+                                    )
+
+                                    if best_tilt is not None:
+                                        self.last_tilt = best_tilt
+                                        self.last_height = camera_height_m
+                                        self.last_distance = real_distance_m
+
+                                        print(
+                                            f"[AUTO-TILT] Recalculated tilt: {best_tilt}° "
+                                            f"(Height={camera_height_m}, Distance={real_distance_m})"
+                                        )
+
+                                # Use stored tilt
+                                if self.last_tilt is not None:
+                                    distance_tilt = self.camera.estimate_distance_2(
+                                        y_pixel=y_bottom,
+                                        camera_tilt_deg=self.last_tilt,
+                                        camera_height_m=camera_height_m
+                                    )
+
                         
+                        # Console print
+                        tilt_str = f"{distance_tilt:.2f}m" if distance_tilt is not None else "N/A"
+                        print(f"  -> Person {person_idx + 1}: Pinhole:{distance_pinhole:.2f}m, Tilt:{tilt_str}, Real:{real_distance_m:.2f}m")
+
+                                
                         # Draw bounding box in GREEN for person (only if draw_boxes is True)
                         if draw_boxes:
                             person_box_color = (0, 255, 0)  # Green for person
@@ -644,8 +675,12 @@ class PeopleDetector:
                             
                             # Add confidence label
                             label = f"Person: {confidence:.2f}"
-                            if distance_m is not None:
-                                label += f" ({distance_m:.1f}m)"
+                            if distance_pinhole is not None:
+                                label += f", distance_pinhole: {distance_pinhole:.2f}m"
+
+                            if distance_tilt is not None:
+                                label += f", distance_tilt: {distance_tilt:.2f}m"
+
                             
                             cv2.putText(image_with_boxes, label, 
                                       (int(x1), int(y1) - 10), 
@@ -661,24 +696,18 @@ class PeopleDetector:
                         }
                         
                         # Add distance if available
-                        if distance_m is not None:
-                            detection_info['distance_m'] = float(distance_m)
-                        
+                        if distance_pinhole is not None:
+                            detection_info['distance_pinhole_m'] = float(distance_pinhole)
+
+                        if distance_tilt is not None:
+                            detection_info['distance_tilt_m'] = float(distance_tilt)
+
                         detections_info.append(detection_info)
         
         return image_with_boxes, detections_info
     
     def extract_person_crops(self, image, detections_info):
-        """
-        Extract person crops from the original image based on detections.
-        
-        Args:
-            image: Original image (numpy array)
-            detections_info: List of detection dictionaries
-            
-        Returns:
-            list: List of tuples (crop_image, crop_info)
-        """
+        """Extract person crops from the original image based on detections."""
         crops = []
         
         for i, detection in enumerate(detections_info):
@@ -702,17 +731,8 @@ class PeopleDetector:
             x2_pad = min(image.shape[1], x2 + pad_x)
             y2_pad = min(image.shape[0], y2 + pad_y)
             
-            # Check minimum size
             crop_width = x2_pad - x1_pad
             crop_height = y2_pad - y1_pad
-            
-            try:
-                min_size = CROP_MIN_SIZE
-            except NameError:
-                min_size = 32  # Default fallback
-                
-            #if crop_width < min_size or crop_height < min_size:
-            #    continue  # Skip crops that are too small
             
             # Crop the image
             cropped_person = image[y1_pad:y2_pad, x1_pad:x2_pad]
@@ -730,31 +750,14 @@ class PeopleDetector:
         return crops
     
     def detect_weapons_in_crops(self, crops_with_info):
-        """
-        Detect weapons in person crops using the weapon detector.
-        
-        Args:
-            crops_with_info: List of tuples (crop_image, crop_info)
-            
-        Returns:
-            list: List of weapon detection results
-        """
+        """Detect weapons in person crops using the weapon detector."""
         if not self.enable_weapon_detection or not self.weapon_detector:
             return []
         
         return self.weapon_detector.process_multiple_crops(crops_with_info)
     
     def draw_weapon_boxes_on_full_image(self, image, weapon_results):
-        """
-        Draw weapon bounding boxes in RED on the full image.
-        
-        Args:
-            image: Full image (numpy array)
-            weapon_results: List of weapon detection results from detect_weapons_in_crops
-            
-        Returns:
-            image: Image with weapon boxes drawn
-        """
+        """Draw weapon bounding boxes in RED on the full image."""
         for result in weapon_results:
             if result['has_weapons'] and result['weapon_detections']:
                 # Get person crop info to translate weapon boxes to full image coordinates
@@ -790,17 +793,7 @@ class PeopleDetector:
         return image
     
     def save_weapon_detection_results(self, weapon_results, output_dir, base_filename):
-        """
-        Save weapon detection results - only weapon bounding box crops.
-        
-        Args:
-            weapon_results: List of weapon detection results
-            output_dir: Output directory
-            base_filename: Base filename for saving
-            
-        Returns:
-            tuple: (Number of weapon detections saved, number of people with weapons)
-        """
+        """Save weapon detection results - only weapon bounding box crops."""
         if not weapon_results:
             return 0, 0
         
@@ -813,7 +806,7 @@ class PeopleDetector:
         
         for result in weapon_results:
             person_id = result['person_info']['person_id']
-            person_confidence = result['person_info']['confidence']
+            #person_confidence = result['person_info']['confidence']
             
             if result['has_weapons'] and result['weapon_crops']:
                 people_with_weapons += 1
@@ -835,15 +828,7 @@ class PeopleDetector:
         return weapons_detected, people_with_weapons
 
     def save_bounding_box_crops(self, image, detections_info, crops_dir, base_filename):
-        """
-        Save individual cropped images for each detected person.
-        
-        Args:
-            image: Original image (numpy array)
-            detections_info: List of detection dictionaries
-            crops_dir: Directory to save crops (already created)
-            base_filename: Base filename (without extension)
-        """
+        """Save individual cropped images for each detected person."""
         
         saved_crops = 0
         
@@ -893,15 +878,8 @@ class PeopleDetector:
         
         return saved_crops
     
-    def process_directory(self, input_dir: str, output_dir: str, with_weapons=False):
-        """
-        Process all images in a directory and save results.
-        
-        Args:
-            input_dir: Directory containing input images
-            output_dir: Directory to save processed images
-            with_weapons: Legacy parameter, now determined from directory name
-        """
+    def process_directory(self, input_dir, output_dir):
+        """Process all images in a directory and save results."""
         # Create organized output directories
         detections_dir = os.path.join(output_dir, "detections")
         crops_dir = os.path.join(output_dir, "crops")
@@ -966,7 +944,7 @@ class PeopleDetector:
                 for detection in detections:
                     x1, y1, x2, y2 = detection['bbox']
                     confidence = detection['confidence']
-                    distance_m = detection.get('distance_m', None)
+                    #distance_m = detection.get('distance_m', None)
                     
                     person_box_color = (0, 255, 0)  # Green for person
                     cv2.rectangle(combined_image, 
@@ -976,8 +954,13 @@ class PeopleDetector:
                     
                     # Add confidence label
                     label = f"Person: {confidence:.2f}"
-                    if distance_m is not None:
-                        label += f" ({distance_m:.1f}m)"
+
+                    if 'distance_pixel_m' in detection:
+                        label += f" Pinhole:{detection['distance_pixel_m']:.1f}m"
+
+                    if 'distance_tilt_m' in detection:
+                        label += f" Tilt:{detection['distance_tilt_m']:.1f}m"
+
                     
                     cv2.putText(combined_image, label, 
                               (int(x1), int(y1) - 10), 
@@ -995,17 +978,39 @@ class PeopleDetector:
                 cv2.imwrite(detection_path, combined_image)
                 
                 # Extract distances and (estimated, real) pairs from detections
-                distances = [d['distance_m'] for d in detections if 'distance_m' in d]
-                real_distance = self.extract_real_distance_from_filename(image_path)
-                camera_height = self.extract_camera_height_from_filename(image_path)
+                distances = []
+                for d in detections:
+                    if 'distance_pinhole_m' in d:
+                        distances.append(d['distance_pinhole_m'])
+
+                    if 'distance_tilt_m' in d and d['distance_tilt_m'] is not None:
+                        distances.append(d['distance_tilt_m'])
+                
+                real_distance, camera_height, camera_tilt = self.extract_distance_height_tilt(image_path)
                 sample_class = 'real' if dir_name.lower().startswith('real') else 'falso'
+                
                 distance_pairs = []
                 if real_distance is not None:
                     for d in detections:
-                        if 'distance_m' in d:
-                            distance_pairs.append((d['distance_m'], real_distance))
+                        if 'distance_pinhole_m' in d:
+                            distance_pairs.append((d['distance_pinhole_m'], real_distance, "pinhole"))
+
+                        if 'distance_tilt_m' in d and d['distance_tilt_m'] is not None:
+                            distance_pairs.append((d['distance_tilt_m'], real_distance, "tilt"))
+
                 # Update statistics with ground truth from directory name
-                self.stats.add_image_results(len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth, distances, distance_pairs, real_distance, camera_height, sample_class)
+                self.stats.add_image_results(
+                    len(detections),
+                    weapons_detected,
+                    people_with_weapons_count,
+                    has_weapons_ground_truth,
+                    distances,
+                    distance_pairs,
+                    real_distance,
+                    camera_height,
+                    sample_class,
+                )
+
                 
                 # Print detection summary
                 if detections:
@@ -1041,13 +1046,7 @@ class PeopleDetector:
                 print(f"Distance measurements: {stats['total_distances']}")
     
     def process_all_sample_directories(self, samples_dir: str, output_base_dir: str):
-        """
-        Process all sample directories and maintain organized folder structure.
-        
-        Args:
-            samples_dir: Base directory containing sample folders
-            output_base_dir: Base output directory
-        """
+        """Process all sample directories and maintain organized folder structure."""
         # Get all subdirectories in samples
         sample_dirs = [d for d in os.listdir(samples_dir) 
                       if os.path.isdir(os.path.join(samples_dir, d))]

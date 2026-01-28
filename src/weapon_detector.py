@@ -1,5 +1,5 @@
 """
-Weapon Detection using YOLOv8 Model
+Weapon Detection using YOLO Model
 Detects weapons in cropped person images.
 """
 
@@ -7,19 +7,19 @@ import cv2
 from pathlib import Path
 from ultralytics import YOLO
 
+# Fix for PosixPath on Windows when loading models trained on Linux
+import pathlib
+import sys
+if sys.platform == 'win32':
+    pathlib.PosixPath = pathlib.WindowsPath
+
 class WeaponDetector:
     def __init__(self, model_path: str = None, confidence_threshold: float = 0.2):
-        """
-        Initialize the weapon detector with YOLOv8 model.
-        
-        Args:
-            model_path: Path to the YOLOv8 weapon detection model
-            confidence_threshold: Minimum confidence for detections
-        """
+        """Initialize the weapon detector with YOLO model."""
         if model_path is None:
             # Default path to the weapons model
             current_dir = Path(__file__).parent
-            model_path = current_dir.parent / "models" / "weapons" / "yolov8guns.pt"
+            model_path = current_dir.parent / "models" / "weapons" / "best.pt"
         
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
@@ -27,24 +27,18 @@ class WeaponDetector:
         
         # Load the model
         try:
-            self.model = YOLO(str(self.model_path))
-            print(f"Loaded YOLOv8 weapon detection model: {self.model_path}")
+            # Convert to absolute string path for cross-platform compatibility
+            model_path_str = str(Path(self.model_path).resolve())
+            self.model = YOLO(model_path_str)
+            print(f"Loaded YOLO weapon detection model: {self.model_path}")
             print(f"Model classes: {self.model.names}")
         except Exception as e:
             raise RuntimeError(f"Failed to load weapon detection model: {e}")
     
     def detect_weapons(self, image):
-        """
-        Detect weapons in a single image using YOLOv8.
-        
-        Args:
-            image: Input image (numpy array)
-            
-        Returns:
-            tuple: (annotated_image, detections_info, weapon_crops)
-        """
+        """Detect weapons in a single image using YOLO."""
         try:
-            # Run YOLOv8 inference with IOU threshold for better NMS
+            # Run YOLO inference with IOU threshold for better NMS
             # iou=0.4 means boxes with IoU > 0.4 will be suppressed (keeps only best box)
             results = self.model(image, conf=self.confidence_threshold, iou=0.4, verbose=False)
             
@@ -112,16 +106,7 @@ class WeaponDetector:
             return image, [], []
     
     def process_person_crop(self, crop_image, crop_info):
-        """
-        Process a single person crop for weapon detection.
-        
-        Args:
-            crop_image: Cropped person image (numpy array)
-            crop_info: Information about the person crop
-            
-        Returns:
-            dict: Results containing annotated image and detection info
-        """
+        """Process a single person crop for weapon detection."""
         annotated_crop, weapon_detections, weapon_crops = self.detect_weapons(crop_image)
         
         return {
@@ -134,15 +119,7 @@ class WeaponDetector:
         }
     
     def process_multiple_crops(self, crops_with_info):
-        """
-        Process multiple person crops for weapon detection.
-        
-        Args:
-            crops_with_info: List of tuples (crop_image, crop_info)
-            
-        Returns:
-            list: List of detection results for each crop
-        """
+        """Process multiple person crops for weapon detection."""
         results = []
         
         for crop_image, crop_info in crops_with_info:
