@@ -78,6 +78,9 @@ class DetectionStatistics:
         # Distance pairs per camera height for RMSE calculation
         self.distance_pairs_by_height = {}  # {2: [(est, real), ...], 5: [...]}
         
+        # Track tilt angles used for each camera height
+        self.tilt_angles_by_height = {}  # {2: [45.0, 45.0, ...], 5: [...]}
+        
         # Segmented metrics: per distance, height, and class
         self.metrics_by_distance = {}  # {5: {tp, tn, fp, fn}, 10: {...}}
         self.metrics_by_height = {}    # {2: {tp, tn, fp, fn}, 5: {...}}
@@ -140,7 +143,7 @@ class DetectionStatistics:
                 self.sample_metrics_by_class[self.current_sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
             self.sample_metrics_by_class[self.current_sample_class][metric_result] += 1
     
-    def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth, distances=None, distance_pairs=None, real_distance=None, camera_height=None, sample_class=None):
+    def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth, distances=None, distance_pairs=None, real_distance=None, camera_height=None, sample_class=None, camera_tilt_deg=None):
         """Add results from processing one image."""
 
         self.total_images += 1
@@ -203,6 +206,12 @@ class DetectionStatistics:
                     self.distance_pairs_pinhole.append((est, real))
                 elif method == "tilt":
                     self.distance_pairs_tilt.append((est, real))
+                    
+                    # Track tilt angle used for tilt method
+                    if camera_height is not None and camera_tilt_deg is not None:
+                        if camera_height not in self.tilt_angles_by_height:
+                            self.tilt_angles_by_height[camera_height] = []
+                        self.tilt_angles_by_height[camera_height].append(camera_tilt_deg)
 
                 # group by camera height
                 if camera_height is not None:
@@ -383,6 +392,19 @@ class DetectionStatistics:
 
                     if rmse is not None:
                         print(f"   {method.upper()} RMSE: {rmse:.3f} m")
+                        
+                        # For tilt method, show the tilt angle(s) used
+                        if method == "tilt" and height in self.tilt_angles_by_height:
+                            tilt_angles = self.tilt_angles_by_height[height]
+                            if tilt_angles:
+                                # Calculate mean and show range
+                                mean_tilt = sum(tilt_angles) / len(tilt_angles)
+                                min_tilt = min(tilt_angles)
+                                max_tilt = max(tilt_angles)
+                                if min_tilt == max_tilt:
+                                    print(f"   TILT ANGLE USED: {mean_tilt:.1f}°")
+                                else:
+                                    print(f"   TILT ANGLE USED: {mean_tilt:.1f}° (range: {min_tilt:.1f}° - {max_tilt:.1f}°)")
                     else:
                         print(f"   {method.upper()} RMSE: N/A")
         
@@ -1009,6 +1031,7 @@ class PeopleDetector:
                     real_distance,
                     camera_height,
                     sample_class,
+                    camera_tilt,
                 )
 
                 
