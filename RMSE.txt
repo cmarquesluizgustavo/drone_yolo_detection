@@ -1,0 +1,54 @@
+PINHOLE ESTIMATION:
+
+RMSE BY (DISTANCE, HEIGHT) COMBINATIONS:
+   Distance: 5.0m, Height: 2.0m
+      Class 'falso': RMSE = 1.659m (30 measurements)
+      Class 'real': RMSE = 1.403m (30 measurements)
+      Class 'all':   RMSE = 1.536m (60 measurements)
+   Distance: 5.0m, Height: 5.0m
+      Class 'falso': RMSE = 0.510m (29 measurements)
+      Class 'real': RMSE = 0.403m (29 measurements)
+      Class 'all':   RMSE = 0.460m (58 measurements)
+   Distance: 10.0m, Height: 2.0m
+      Class 'falso': RMSE = 3.264m (30 measurements)
+      Class 'real': RMSE = 3.287m (30 measurements)
+      Class 'all':   RMSE = 3.276m (60 measurements)
+   Distance: 10.0m, Height: 5.0m
+      Class 'falso': RMSE = 2.406m (30 measurements)
+      Class 'real': RMSE = 2.229m (29 measurements)
+      Class 'all':   RMSE = 2.321m (59 measurements)
+
+OVERALL DISTANCE ESTIMATION RMSE: 2.169m
+
+Height: 2.0m
+    RMSE:      2.558m
+Height: 5.0m
+    RMSE:      1.680m
+
+
+TILT ESTIMATION:
+
+RMSE BY (DISTANCE, HEIGHT) COMBINATIONS:
+   Distance: 5.0m, Height: 2.0m
+      Class 'falso': RMSE = 0.480m (30 measurements)
+      Class 'real': RMSE = 0.468m (30 measurements)
+      Class 'all':   RMSE = 0.474m (60 measurements)
+   Distance: 5.0m, Height: 5.0m
+      Class 'falso': RMSE = 0.432m (29 measurements)
+      Class 'real': RMSE = 0.276m (29 measurements)
+      Class 'all':   RMSE = 0.363m (58 measurements)
+   Distance: 10.0m, Height: 2.0m
+      Class 'falso': RMSE = 0.547m (30 measurements)
+      Class 'real': RMSE = 2.572m (30 measurements)
+      Class 'all':   RMSE = 1.860m (60 measurements)
+   Distance: 10.0m, Height: 5.0m
+      Class 'falso': RMSE = 0.848m (30 measurements)
+      Class 'real': RMSE = 0.282m (29 measurements)
+      Class 'all':   RMSE = 0.636m (59 measurements)
+
+Height: 2.0m
+   RMSE:      1.357m
+Height: 5.0m
+   RMSE:      0.519m
+
+OVERALL DISTANCE ESTIMATION RMSE: 1.032m

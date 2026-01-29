@@ -38,6 +38,8 @@ def main():
                        help='Disable saving individual person crops')
     parser.add_argument('--no-weapons', action='store_true',
                        help='Disable weapon detection in person crops')
+    parser.add_argument('--filter-clips', action='store_true',
+                       help='Process only clips 0, 2, and 7 (clip_000, clip_002, clip_007)')
     
     args = parser.parse_args()
     
@@ -84,6 +86,8 @@ def main():
         print(f"Weapon confidence threshold: {args.weapon_confidence}")
     print(f"Sample majority threshold: {args.sample_majority_threshold} frame(s)")
     print(f"Ground truth determined from filenames: 'real*' = has weapons, 'falso*' = no weapons")
+    if args.filter_clips:
+        print(f"Filtering to clips: 0, 2, 7 only")
     
     # Check if input is a single directory with images or a parent directory with subdirectories
     if os.path.isdir(input_dir):
@@ -97,7 +101,7 @@ def main():
             detector.process_directory(input_dir, args.output)
         else:
             # Directory with subdirectories
-            detector.process_all_sample_directories(input_dir, args.output)
+            detector.process_all_sample_directories(input_dir, args.output, filter_clips=args.filter_clips)
     else:
         print(f"Error: Input path does not exist: {input_dir}")
         return 1

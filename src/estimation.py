@@ -1,3 +1,4 @@
+import math
 import numpy as np
 
 class Camera:
@@ -20,6 +21,10 @@ class Camera:
         self.pixel_size_x_mm = sensor_width_mm / image_width_px
         self.pixel_size_y_mm = sensor_height_mm / image_height_px
 
+        # Compute vertical FOV from real optics
+        self.vertical_fov_deg = math.degrees(
+            2 * math.atan(sensor_height_mm / (2 * self.focal_length_mm))
+        )
 
     def estimate_distance(self, pixel_height, real_height_m=1.7):
 
@@ -28,3 +33,15 @@ class Camera:
         
         distance_m = (real_height_m * focal_length_m) / (pixel_height * pixel_size_y_m)
         return distance_m
+    
+    def estimate_distance_2(self, y_pixel, camera_tilt_deg, camera_height_m):
+        
+        pixel_offset = (y_pixel - self.image_height_px / 2) / self.image_height_px
+        pixel_angle_deg = pixel_offset * self.vertical_fov_deg
+
+        alpha_deg = camera_tilt_deg + pixel_angle_deg
+
+        if alpha_deg <= 0:
+            return None
+
+        return camera_height_m / math.tan(math.radians(alpha_deg))

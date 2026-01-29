@@ -86,6 +86,14 @@ class DetectionStatistics:
         self.distance_pairs = []
         # Distance pairs per camera height for RMSE calculation
         self.distance_pairs_by_height = {}  # {2: [(est, real), ...], 5: [...]}
+        # Distance pairs by (class, distance, height) combinations
+        self.distance_pairs_by_combination = {}  # {('real', 5, 2): [(est, real), ...], ...}
+        # Distance pairs by (distance, height) for aggregation across classes
+        self.distance_pairs_by_dist_height = {}  # {(5, 2): [(est, real), ...], ...}
+        # Distance pairs by (class, distance, height, tilt) combinations
+        self.distance_pairs_by_combination_with_tilt = {}  # {('real', 5, 2, 2): [(est, real), ...], ...}
+        # Distance pairs by (distance, height, tilt) for aggregation across classes
+        self.distance_pairs_by_dist_height_tilt = {}  # {(5, 2, 2): [(est, real), ...], ...}
         
         # Segmented metrics: per distance, height, and class
         self.metrics_by_distance = {}  # {5: {tp, tn, fp, fn}, 10: {...}}
@@ -149,7 +157,7 @@ class DetectionStatistics:
                 self.sample_metrics_by_class[self.current_sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
             self.sample_metrics_by_class[self.current_sample_class][metric_result] += 1
     
-    def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth, distances=None, distance_pairs=None, real_distance=None, camera_height=None, sample_class=None):
+    def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth, distances=None, distance_pairs=None, real_distance=None, camera_height=None, sample_class=None, camera_tilt=None):
         """Add results from processing one image."""
 
         self.total_images += 1
@@ -219,6 +227,30 @@ class DetectionStatistics:
                 if camera_height not in self.distance_pairs_by_height:
                     self.distance_pairs_by_height[camera_height] = []
                 self.distance_pairs_by_height[camera_height].extend(distance_pairs)
+            # Track by (class, distance, height) combination
+            if sample_class is not None and real_distance is not None and camera_height is not None:
+                combination_key = (sample_class, real_distance, camera_height)
+                if combination_key not in self.distance_pairs_by_combination:
+                    self.distance_pairs_by_combination[combination_key] = []
+                self.distance_pairs_by_combination[combination_key].extend(distance_pairs)
+            # Track by (distance, height) for aggregation across classes
+            if real_distance is not None and camera_height is not None:
+                dist_height_key = (real_distance, camera_height)
+                if dist_height_key not in self.distance_pairs_by_dist_height:
+                    self.distance_pairs_by_dist_height[dist_height_key] = []
+                self.distance_pairs_by_dist_height[dist_height_key].extend(distance_pairs)
+            # Track by (class, distance, height, tilt) combination with tilt
+            if sample_class is not None and real_distance is not None and camera_height is not None and camera_tilt is not None:
+                combination_key_tilt = (sample_class, real_distance, camera_height, camera_tilt)
+                if combination_key_tilt not in self.distance_pairs_by_combination_with_tilt:
+                    self.distance_pairs_by_combination_with_tilt[combination_key_tilt] = []
+                self.distance_pairs_by_combination_with_tilt[combination_key_tilt].extend(distance_pairs)
+            # Track by (distance, height, tilt) for aggregation across classes
+            if real_distance is not None and camera_height is not None and camera_tilt is not None:
+                dist_height_tilt_key = (real_distance, camera_height, camera_tilt)
+                if dist_height_tilt_key not in self.distance_pairs_by_dist_height_tilt:
+                    self.distance_pairs_by_dist_height_tilt[dist_height_tilt_key] = []
+                self.distance_pairs_by_dist_height_tilt[dist_height_tilt_key].extend(distance_pairs)
     def compute_rmse(self, distance_pairs=None):
         """Compute RMSE for distance estimation (only where real distance is available)."""
         pairs = distance_pairs if distance_pairs is not None else self.distance_pairs
@@ -417,6 +449,44 @@ class DetectionStatistics:
                 print(f"      F1-Score:  {f1:.3f}")
                 print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
         
+        # Print RMSE by (distance, height) combinations, showing per-class and aggregate
+        if self.distance_pairs_by_dist_height:
+            print(f"\nRMSE BY (DISTANCE, HEIGHT) COMBINATIONS:")
+            for (dist, height) in sorted(self.distance_pairs_by_dist_height.keys()):
+                print(f"   Distance: {dist}m, Height: {height}m")
+                # Show per-class RMSE
+                for cls in ['falso', 'real']:
+                    cls_key = (cls, dist, height)
+                    if cls_key in self.distance_pairs_by_combination:
+                        pairs = self.distance_pairs_by_combination[cls_key]
+                        rmse_cls = self.compute_rmse(pairs)
+                        if rmse_cls is not None:
+                            print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
+                # Show aggregate RMSE for all classes
+                all_pairs = self.distance_pairs_by_dist_height[(dist, height)]
+                rmse_all = self.compute_rmse(all_pairs)
+                if rmse_all is not None:
+                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
+        
+        # Print RMSE by (distance, height, tilt) combinations, showing per-class and aggregate
+        if self.distance_pairs_by_dist_height_tilt:
+            print(f"\nRMSE BY (DISTANCE, HEIGHT, TILT) COMBINATIONS:")
+            for (dist, height, tilt) in sorted(self.distance_pairs_by_dist_height_tilt.keys()):
+                print(f"   Distance: {dist}m, Height: {height}m, Tilt: {tilt}deg")
+                # Show per-class RMSE
+                for cls in ['falso', 'real']:
+                    cls_key = (cls, dist, height, tilt)
+                    if cls_key in self.distance_pairs_by_combination_with_tilt:
+                        pairs = self.distance_pairs_by_combination_with_tilt[cls_key]
+                        rmse_cls = self.compute_rmse(pairs)
+                        if rmse_cls is not None:
+                            print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
+                # Show aggregate RMSE for all classes
+                all_pairs = self.distance_pairs_by_dist_height_tilt[(dist, height, tilt)]
+                rmse_all = self.compute_rmse(all_pairs)
+                if rmse_all is not None:
+                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
+        
         # Print overall RMSE
         rmse = self.compute_rmse()
         if rmse is not None:
@@ -562,6 +632,29 @@ class PeopleDetector:
             except ValueError:
                 pass
         return None
+    
+    def extract_camera_tilt_from_filename(self, filepath: str):
+        """
+        Extracts the camera tilt from folder name.
+        Pattern: class_distance_height_TILT_clip_...
+        Example: falso_05_02_2_clip_000 -> distance=05, height=02, tilt=2
+        If no tilt is present, returns None.
+        """
+        import re
+        dir_path = os.path.dirname(filepath)
+        dir_name = os.path.basename(dir_path)
+        if not dir_name:
+            dir_name = os.path.splitext(os.path.basename(filepath))[0]
+        numbers = re.findall(r'\d{1,3}', dir_name)
+        # If we have 4+ numbers: numbers[0]=distance, numbers[1]=height, numbers[2]=tilt, numbers[3]=clip
+        # If we have 3 numbers: numbers[0]=distance, numbers[1]=height, numbers[2]=clip (no tilt)
+        if len(numbers) >= 4:
+            try:
+                tilt = float(numbers[2])
+                return tilt
+            except ValueError:
+                pass
+        return None
         
     def detect_people(self, image_path: str, draw_boxes: bool = False):
         """
@@ -604,20 +697,32 @@ class PeopleDetector:
                         distance_m = None
                         if self.camera:
                             try:
-                                distance_m = self.camera.estimate_distance(person_height_px)
-                                
-                                # Extract real distance and camera height from file path
+                                # Extract real distance, camera height, and tilt from file path
                                 image_name = os.path.basename(image_path)
                                 real_distance_m = self.extract_real_distance_from_filename(image_path)
                                 camera_height_m = self.extract_camera_height_from_filename(image_path)
+                                camera_tilt_deg = self.extract_camera_tilt_from_filename(image_path)
+                                
+                                # Use estimate_distance_2 if tilt is available, otherwise use pinhole model
+                                if camera_tilt_deg is not None and camera_height_m is not None:
+                                    y_bottom = y2
+                                    distance_m = self.camera.estimate_distance_2(
+                                        y_pixel=y_bottom,
+                                        camera_tilt_deg=camera_tilt_deg,
+                                        camera_height_m=camera_height_m
+                                    )
+                                else:
+                                    distance_m = self.camera.estimate_distance(person_height_px)
                                 # Build log message with proper formatting
                                 real_dist_str = f"{real_distance_m:.2f}" if real_distance_m is not None else "N/A"
                                 cam_height_str = f"{camera_height_m:.2f}" if camera_height_m is not None else "N/A"
+                                cam_tilt_str = f"{camera_tilt_deg:.2f}" if camera_tilt_deg is not None else "N/A"
                                 log_message = (f"Image: {image_name}, Person: {person_idx + 1}, "
                                              f"PixelHeight: {person_height_px:.1f}px, "
                                              f"Estimated: {distance_m:.2f}m, "
                                              f"Real: {real_dist_str}m, "
                                              f"CameraHeight: {cam_height_str}m, "
+                                             f"CameraTilt: {cam_tilt_str}deg, "
                                              f"Confidence: {confidence:.3f}, "
                                              f"BBox: [{int(x1)}, {int(y1)}, {int(x2)}, {int(y2)}]")
                                 self.distance_logger.info(log_message)
@@ -628,6 +733,8 @@ class PeopleDetector:
                                     console_msg += f", Real:{real_distance_m:.2f}m"
                                 if camera_height_m is not None:
                                     console_msg += f", CamHeight:{camera_height_m:.2f}m"
+                                if camera_tilt_deg is not None:
+                                    console_msg += f", Tilt:{camera_tilt_deg:.0f}deg"
                                 console_msg += f", {person_height_px:.1f}px"
                                 print(console_msg)
                                 
@@ -998,6 +1105,7 @@ class PeopleDetector:
                 distances = [d['distance_m'] for d in detections if 'distance_m' in d]
                 real_distance = self.extract_real_distance_from_filename(image_path)
                 camera_height = self.extract_camera_height_from_filename(image_path)
+                camera_tilt = self.extract_camera_tilt_from_filename(image_path)
                 sample_class = 'real' if dir_name.lower().startswith('real') else 'falso'
                 distance_pairs = []
                 if real_distance is not None:
@@ -1005,7 +1113,7 @@ class PeopleDetector:
                         if 'distance_m' in d:
                             distance_pairs.append((d['distance_m'], real_distance))
                 # Update statistics with ground truth from directory name
-                self.stats.add_image_results(len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth, distances, distance_pairs, real_distance, camera_height, sample_class)
+                self.stats.add_image_results(len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth, distances, distance_pairs, real_distance, camera_height, sample_class, camera_tilt)
                 
                 # Print detection summary
                 if detections:
@@ -1040,19 +1148,27 @@ class PeopleDetector:
             if stats['total_distances'] > 0:
                 print(f"Distance measurements: {stats['total_distances']}")
     
-    def process_all_sample_directories(self, samples_dir: str, output_base_dir: str):
+    def process_all_sample_directories(self, samples_dir: str, output_base_dir: str, filter_clips=False):
         """
         Process all sample directories and maintain organized folder structure.
         
         Args:
             samples_dir: Base directory containing sample folders
             output_base_dir: Base output directory
+            filter_clips: If True, only process clips 0, 2, and 7
         """
         # Get all subdirectories in samples
-        sample_dirs = [d for d in os.listdir(samples_dir) 
-                      if os.path.isdir(os.path.join(samples_dir, d))]
+        all_sample_dirs = [d for d in os.listdir(samples_dir) 
+                          if os.path.isdir(os.path.join(samples_dir, d))]
         
-        print(f"Found {len(sample_dirs)} sample directories")
+        # Filter by clip numbers if requested
+        if filter_clips:
+            sample_dirs = [d for d in all_sample_dirs 
+                          if any(f'_clip_00{i}' in d for i in [0, 2, 7])]
+            print(f"Found {len(sample_dirs)} sample directories (filtered to clips 0,2,7 from {len(all_sample_dirs)} total)")
+        else:
+            sample_dirs = all_sample_dirs
+            print(f"Found {len(sample_dirs)} sample directories")
         
         # Create main organized output structure
         detections_base_dir = os.path.join(output_base_dir, "detections")
