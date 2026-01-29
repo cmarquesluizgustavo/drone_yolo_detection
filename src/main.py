@@ -11,7 +11,7 @@ from pathlib import Path
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from detector import PeopleDetector
+from detection_pipeline import DetectionPipeline
 
 
 def main():
@@ -70,19 +70,19 @@ def main():
     # Create output directory
     Path(args.output).mkdir(parents=True, exist_ok=True)
     
-    # Initialize detector
-    print(f"Initializing detector with model: {args.model}")
-    detector = PeopleDetector(args.model, args.confidence, enable_weapon_detection=enable_weapons, weapon_confidence_threshold=args.weapon_confidence, sample_majority_threshold=args.sample_majority_threshold)
+    # Initialize pipeline
+    print(f"Initializing detection pipeline with model: {args.model}")
+    pipeline = DetectionPipeline(args.model, args.confidence, enable_weapon_detection=enable_weapons, weapon_confidence_threshold=args.weapon_confidence, sample_majority_threshold=args.sample_majority_threshold)
     
     # Set crop saving preference
-    detector.save_crops = save_crops
+    pipeline.save_crops = save_crops
     
     # Process all sample directories
     print(f"Processing samples from: {input_dir}")
     print(f"Output will be saved to: {args.output}")
     print(f"Crop saving: {'Enabled' if save_crops else 'Disabled'}")
-    print(f"Weapon detection: {'Enabled' if enable_weapons and detector.enable_weapon_detection else 'Disabled'}")
-    if enable_weapons and detector.enable_weapon_detection:
+    print(f"Weapon detection: {'Enabled' if enable_weapons and pipeline.enable_weapon_detection else 'Disabled'}")
+    if enable_weapons and pipeline.enable_weapon_detection:
         print(f"Weapon confidence threshold: {args.weapon_confidence}")
     print(f"Sample majority threshold: {args.sample_majority_threshold} frame(s)")
     print(f"Ground truth determined from filenames: 'real*' = has weapons, 'falso*' = no weapons")
@@ -98,16 +98,16 @@ def main():
         if image_files:
             # Direct directory with images
             print(f"Processing single directory with {len(image_files)} images")
-            detector.process_directory(input_dir, args.output)
+            pipeline.process_directory(input_dir, args.output)
         else:
             # Directory with subdirectories
-            detector.process_all_sample_directories(input_dir, args.output, filter_clips=args.filter_clips)
+            pipeline.process_all_sample_directories(input_dir, args.output, filter_clips=args.filter_clips)
     else:
         print(f"Error: Input path does not exist: {input_dir}")
         return 1
 
     # Print comprehensive statistics
-    detector.stats.print_summary()
+    pipeline.stats.print_summary()
     print("\nProcessing complete!")
     return 0
 
