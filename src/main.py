@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from detection_pipeline import DetectionPipeline
+from dual_drone_pipeline import DualDroneDetectionPipeline
 
 
 def main():
@@ -40,6 +41,14 @@ def main():
                        help='Disable weapon detection in person crops')
     parser.add_argument('--filter-clips', action='store_true',
                        help='Process only clips 0, 2, and 7 (clip_000, clip_002, clip_007)')
+    parser.add_argument('--dual-drone', action='store_true',
+                       help='Enable dual-drone mode with two input directories')
+    parser.add_argument('--input-drone1', default=None,
+                       help='Input directory for drone 1 (dual-drone mode)')
+    parser.add_argument('--input-drone2', default=None,
+                       help='Input directory for drone 2 (dual-drone mode)')
+    parser.add_argument('--association-threshold', type=float, default=2.0,
+                       help='Distance threshold (meters) for associating detections across drones (default: 2.0)')
     
     args = parser.parse_args()
     
@@ -70,7 +79,61 @@ def main():
     # Create output directory
     Path(args.output).mkdir(parents=True, exist_ok=True)
     
-    # Initialize pipeline
+    # Check for dual-drone mode
+    if args.dual_drone:
+        if not args.input_drone1 or not args.input_drone2:
+            print("Error: Dual-drone mode requires both --input-drone1 and --input-drone2")
+            return 1
+        
+        if not os.path.exists(args.input_drone1):
+            print(f"Error: Drone 1 input directory not found: {args.input_drone1}")
+            return 1
+        if not os.path.exists(args.input_drone2):
+            print(f"Error: Drone 2 input directory not found: {args.input_drone2}")
+            return 1
+        
+        # Initialize dual-drone pipeline
+        print(f"Initializing DUAL-DRONE detection pipeline with model: {args.model}")
+        pipeline = DualDroneDetectionPipeline(
+            args.model, 
+            args.confidence,
+            enable_weapon_detection=enable_weapons,
+            weapon_confidence_threshold=args.weapon_confidence,
+            sample_majority_threshold=args.sample_majority_threshold,
+            association_threshold=args.association_threshold
+        )
+        
+        # Set crop saving preference
+        pipeline.save_crops = save_crops
+        
+        # Process dual-drone directories
+        print(f"Processing dual-drone samples:")
+        print(f"  Drone 1: {args.input_drone1}")
+        print(f"  Drone 2: {args.input_drone2}")
+        print(f"Output will be saved to: {args.output}")
+        print(f"Crop saving: {'Enabled' if save_crops else 'Disabled'}")
+        print(f"Weapon detection: {'Enabled' if enable_weapons else 'Disabled'}")
+        if enable_weapons:
+            print(f"Weapon confidence threshold: {args.weapon_confidence}")
+        print(f"Sample majority threshold: {args.sample_majority_threshold} frame(s)")
+        print(f"Association threshold: {args.association_threshold}m")
+        if args.filter_clips:
+            print(f"Filtering to clips: 0, 2, 7 only")
+        
+        # Process dual-drone samples
+        pipeline.process_dual_drone_samples(
+            args.input_drone1,
+            args.input_drone2,
+            args.output,
+            filter_clips=args.filter_clips
+        )
+        
+        # Print statistics
+        pipeline.stats.print_summary()
+        print("\nDual-drone processing complete!")
+        return 0
+    
+    # Initialize single-drone pipeline
     print(f"Initializing detection pipeline with model: {args.model}")
     pipeline = DetectionPipeline(args.model, args.confidence, enable_weapon_detection=enable_weapons, weapon_confidence_threshold=args.weapon_confidence, sample_majority_threshold=args.sample_majority_threshold)
     
