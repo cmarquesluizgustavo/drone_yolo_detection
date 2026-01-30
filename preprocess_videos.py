@@ -1,58 +1,140 @@
 #!/usr/bin/env python3
 """
-Video Preprocessing Pipeline for Person Detection
+Dual-Drone Video Preprocessing Pipeline
 
-This script processes raw video files to create:
-1. Video clips of X seconds (inputs)
-2. Frame samples every W frames from clips (input_samples)
+This script processes videos from two drones (drone1 and drone2) to extract frame samples.
+Since videos are already 1080p, no compression or resizing is performed.
 
 Parameters:
-- X: Clip duration in seconds
-- Z: Target resolution (e.g., '1080p', '720p', '480p')
+- X: Clip duration in seconds (for organizing frames)
 - W: Frame sampling interval (extract 1 frame every W frames)
+
+Input structure:
+  inputs/
+    drone1/
+      video1.MP4
+      video2.MP4
+    drone2/
+      video1.MP4
+      video2.MP4
+
+Output structure:
+  inputs/
+    drone1_frames/
+      video1_clip_000/
+        frame_0000.jpg
+        frame_0001.jpg
+      video1_clip_001/
+    drone2_frames/
 """
 
 import cv2
 import argparse
 from pathlib import Path
-from typing import Tuple, Dict
+from typing import Dict, List, Optional
+import shutil
+import os
+import sys
+import warnings
+import json
+from drone_metadata_extractor import DroneMetadataExtractor, DroneMetadata
 
-# Resolution mapping
-RESOLUTIONS = {
-    '1080p': (1920, 1080),
-    '720p': (1280, 720),
-    '480p': (854, 480),
-    '360p': (640, 360),
-    '240p': (426, 240)
-}
+# Suppress all OpenCV/FFmpeg warnings about corrupted frames
+os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'loglevel;quiet'
+os.environ['OPENCV_LOG_LEVEL'] = 'SILENT'
+os.environ['OPENCV_VIDEOIO_DEBUG'] = '0'
 
-class VideoPreprocessor:
-    def __init__(self, raw_dir: str, clips_dir: str, samples_dir: str):
-        self.raw_dir = Path(raw_dir)
-        self.clips_dir = Path(clips_dir)
-        self.samples_dir = Path(samples_dir)
+# Suppress Python warnings
+warnings.filterwarnings('ignore')
+
+# Redirect stderr to devnull to suppress FFmpeg errors
+class SuppressStderr:
+    def __enter__(self):
+        self.old_stderr = sys.stderr
+        sys.stderr = open(os.devnull, 'w')
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stderr.close()
+        sys.stderr = self.old_stderr
+
+class DualDronePreprocessor:
+    def __init__(self, input_dir: str, output_base_dir: str = None, extract_metadata: bool = True):
+        self.input_dir = Path(input_dir)
+        self.extract_metadata = extract_metadata
         
-        # Create directories if they don't exist
-        self.clips_dir.mkdir(parents=True, exist_ok=True)
-        self.samples_dir.mkdir(parents=True, exist_ok=True)
+        # Set up input directories
+        self.drone1_dir = self.input_dir / "drone1"
+        self.drone2_dir = self.input_dir / "drone2"
         
-        # Compression presets
-        self.compression_presets = {
-            'high_quality': {'crf': 18, 'preset': 'slow'},
-            'balanced': {'crf': 23, 'preset': 'medium'},
-            'compressed': {'crf': 28, 'preset': 'fast'},
-            'very_compressed': {'crf': 35, 'preset': 'faster'}
+        # Set up output directories
+        if output_base_dir is None:
+            output_base_dir = self.input_dir
+        else:
+            output_base_dir = Path(output_base_dir)
+        
+        self.drone1_frames_dir = output_base_dir / "drone1_frames"
+        self.drone2_frames_dir = output_base_dir / "drone2_frames"
+        
+        # Verify input directories exist
+        if not self.drone1_dir.exists():
+            raise FileNotFoundError(f"Drone1 directory not found: {self.drone1_dir}")
+        if not self.drone2_dir.exists():
+            raise FileNotFoundError(f"Drone2 directory not found: {self.drone2_dir}")
+        
+        # Create output directories
+        self.drone1_frames_dir.mkdir(parents=True, exist_ok=True)
+        self.drone2_frames_dir.mkdir(parents=True, exist_ok=True)
+    
+    def save_metadata_to_json(self, metadata: DroneMetadata, output_path: Path):
+        """Save metadata to a JSON file alongside the frame."""
+        metadata_dict = {
+            'timestamp_sec': metadata.timestamp,
+            'datetime': metadata.datetime_str,
+            'home': {
+                'longitude': metadata.home_longitude,
+                'latitude': metadata.home_latitude
+            },
+            'gps': {
+                'longitude': metadata.gps_longitude,
+                'latitude': metadata.gps_latitude,
+                'altitude_m': metadata.gps_altitude
+            },
+            'camera': {
+                'iso': metadata.iso,
+                'shutter_speed': metadata.shutter_speed,
+                'exposure_value': metadata.exposure_value,
+                'f_number': metadata.f_number
+            },
+            'orientation': {
+                'frame_pitch': metadata.frame_pitch,
+                'frame_roll': metadata.frame_roll,
+                'frame_yaw': metadata.frame_yaw,
+                'gyro_pitch': metadata.gyro_pitch,
+                'gyro_roll': metadata.gyro_roll,
+                'gyro_yaw': metadata.gyro_yaw
+            }
         }
+        
+        with open(output_path, 'w') as f:
+            json.dump(metadata_dict, f, indent=2)
     
     def get_video_info(self, video_path: str) -> Dict:
         """Get basic video information."""
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
+        # Suppress all FFmpeg/OpenCV output
+        cv2.setLogLevel(0)
+        
+        with SuppressStderr():
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                raise ValueError(f"Cannot open video: {video_path}")
+            
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            duration = frame_count / fps if fps > 0 else 0
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
         
         return {
             'fps': fps,
@@ -62,274 +144,380 @@ class VideoPreprocessor:
             'height': height
         }
     
-    def calculate_target_size(self, original_size: Tuple[int, int], target_resolution: str) -> Tuple[int, int]:
-        """Calculate target size maintaining aspect ratio."""
-        if target_resolution not in RESOLUTIONS:
-            raise ValueError(f"Unsupported resolution: {target_resolution}. Choose from {list(RESOLUTIONS.keys())}")
+    def extract_frames_from_video(self, video_path: str, output_dir: Path, 
+                                  clip_duration: int, frame_interval: int,
+                                  start_time: float = 0, end_time: float = None) -> int:
+        """
+        Extract frames from a video at specified intervals.
         
-        target_width, target_height = RESOLUTIONS[target_resolution]
-        original_width, original_height = original_size
-        
-        # Calculate scaling factor to fit within target resolution
-        scale_w = target_width / original_width
-        scale_h = target_height / original_height
-        scale = min(scale_w, scale_h)
-        
-        new_width = int(original_width * scale)
-        new_height = int(original_height * scale)
-        
-        # Ensure even dimensions for video encoding
-        new_width = new_width - (new_width % 2)
-        new_height = new_height - (new_height % 2)
-        
-        return new_width, new_height
-    
-    def extract_video_clips(self, video_path: str, clip_duration: int, target_resolution: str, 
-                           compression_preset: str = 'balanced', target_fps: float = None, 
-                           max_bitrate: str = None) -> None:
-        """Extract video clips of specified duration with compression options."""
+        Args:
+            video_path: Path to the input video
+            output_dir: Base directory for output frames
+            clip_duration: Duration in seconds to group frames into clips
+            frame_interval: Extract 1 frame every W frames
+            start_time: Start time in seconds (default: 0)
+            end_time: End time in seconds (default: None = until end)
+            
+        Returns:
+            Total number of frames extracted
+        """
         video_info = self.get_video_info(video_path)
         video_name = Path(video_path).stem
         
-        print(f"Processing {video_name}:")
-        print(f"  Original: {video_info['width']}x{video_info['height']}, {video_info['duration']:.1f}s, {video_info['fps']:.1f} fps")
+        print(f"\n  Processing {video_name}:")
+        print(f"    Resolution: {video_info['width']}x{video_info['height']}")
+        print(f"    Duration: {video_info['duration']:.1f}s")
+        print(f"    FPS: {video_info['fps']:.1f}")
+        print(f"    Total frames: {video_info['frame_count']}")
         
-        # Calculate target size
-        target_size = self.calculate_target_size((video_info['width'], video_info['height']), target_resolution)
+        # Initialize metadata extractor if enabled
+        metadata_extractor = None
+        all_metadata = []
+        if self.extract_metadata:
+            try:
+                print(f"    Extracting metadata from video...")
+                metadata_extractor = DroneMetadataExtractor(video_path)
+                all_metadata = metadata_extractor.extract_all_metadata()
+                print(f"    ✓ Found {len(all_metadata)} metadata entries")
+            except Exception as e:
+                print(f"    ⚠ Could not extract metadata: {e}")
+                self.extract_metadata = False  # Disable for remaining videos
         
-        # Handle FPS reduction
-        original_fps = video_info['fps']
-        if target_fps and target_fps < original_fps:
-            output_fps = target_fps
-            fps_reduction = original_fps / target_fps
-            print(f"  Reducing FPS: {original_fps:.1f} → {output_fps:.1f} (saves ~{((fps_reduction-1)/fps_reduction*100):.0f}% size)")
+        # Calculate frame range
+        start_frame = int(start_time * video_info['fps'])
+        if end_time:
+            end_frame = min(int(end_time * video_info['fps']), video_info['frame_count'])
         else:
-            output_fps = original_fps
-            fps_reduction = 1.0
-        
-        print(f"  Target: {target_size[0]}x{target_size[1]}, {output_fps:.1f} fps")
-        print(f"  Compression: {compression_preset}")
-        if max_bitrate:
-            print(f"  Max bitrate: {max_bitrate}")
+            end_frame = video_info['frame_count']
         
         # Calculate number of clips
-        num_clips = int(video_info['duration'] // clip_duration)
-        if num_clips == 0:
-            print(f"  Warning: Video too short for {clip_duration}s clips")
-            return
+        duration_to_process = (end_frame - start_frame) / video_info['fps']
+        num_clips = int(duration_to_process / clip_duration) + 1
         
-        print(f"  Extracting {num_clips} clips of {clip_duration}s each")
+        print(f"    Extracting frames every {frame_interval} frames")
+        print(f"    Organizing into {num_clips} clips of ~{clip_duration}s each")
         
-        # Use ffmpeg for better compression
-        import subprocess
+        # Suppress OpenCV/FFmpeg error messages for corrupted frames
+        cv2.setLogLevel(0)
         
-        for clip_idx in range(num_clips):
-            start_time = clip_idx * clip_duration
-            
-            # Create descriptive filename with compression and fps info
-            fps_suffix = f"_{int(output_fps)}fps" if target_fps and target_fps < original_fps else ""
-            bitrate_suffix = f"_{max_bitrate}" if max_bitrate else ""
-            filename = f"{video_name}_clip_{clip_idx:03d}_{target_resolution}_{compression_preset}{fps_suffix}{bitrate_suffix}.mp4"
-            output_path = self.clips_dir / filename
-            
-            # Build ffmpeg command for better compression
-            cmd = [
-                'ffmpeg', '-y',  # -y to overwrite output files
-                '-ss', str(start_time),  # Start time
-                '-i', str(video_path),   # Input file
-                '-t', str(clip_duration),  # Duration
-                '-vf', f'scale={target_size[0]}:{target_size[1]}',  # Scale
-                '-c:v', 'libx264',  # Use H.264 codec
-            ]
-            
-            # Add compression settings
-            preset_settings = self.compression_presets[compression_preset]
-            cmd.extend(['-crf', str(preset_settings['crf'])])
-            cmd.extend(['-preset', preset_settings['preset']])
-            
-            # Add FPS control
-            if target_fps and target_fps < original_fps:
-                cmd.extend(['-r', str(target_fps)])
-            
-            # Add bitrate limit if specified
-            if max_bitrate:
-                cmd.extend(['-maxrate', max_bitrate, '-bufsize', f"{int(max_bitrate.rstrip('kM')) * 2}k"])
-            
-            # Audio settings (compress audio too)
-            cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
-            
-            # Output file
-            cmd.append(str(output_path))
-            
-            try:
-                # Run ffmpeg with suppressed output
-                result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-                
-                # Get file size
-                file_size_mb = output_path.stat().st_size / (1024 * 1024)
-                print(f"    Created: {output_path.name} ({file_size_mb:.1f}MB)")
-                
-            except subprocess.CalledProcessError as e:
-                print(f"    Error creating {output_path.name}: {e}")
-                print(f"    Command: {' '.join(cmd)}")
-                # Fallback to OpenCV if ffmpeg fails
-                self._extract_clip_opencv_fallback(video_path, clip_idx, clip_duration, target_size, output_fps, output_path)
-    
-    def _extract_clip_opencv_fallback(self, video_path: str, clip_idx: int, clip_duration: int, 
-                                    target_size: tuple, output_fps: float, output_path: Path):
-        """Fallback method using OpenCV if ffmpeg fails."""
-        print(f"    Using OpenCV fallback for {output_path.name}")
+        # Open video with error suppression
+        with SuppressStderr():
+            cap = cv2.VideoCapture(video_path)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
-        cap = cv2.VideoCapture(video_path)
-        video_info = self.get_video_info(video_path)
-        
+        frame_idx = start_frame
+        total_extracted = 0
+        current_clip = 0
         frames_per_clip = int(video_info['fps'] * clip_duration)
-        start_frame = clip_idx * frames_per_clip
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         
-        # Define codec and create VideoWriter
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(str(output_path), fourcc, output_fps, target_size)
+        # Create initial clip directory
+        clip_dir = output_dir / f"{video_name}_clip_{current_clip:03d}"
+        clip_dir.mkdir(exist_ok=True)
+        frames_in_clip = 0
         
-        # Extract frames for this clip
-        for frame_idx in range(frames_per_clip):
-            ret, frame = cap.read()
-            if not ret:
-                break
+        # For progress indication
+        expected_frames = (end_frame - start_frame) // frame_interval
+        corrupted_frames = 0
+        
+        while frame_idx < end_frame:
+            # Read frame with error suppression
+            with SuppressStderr():
+                ret, frame = cap.read()
             
-            # Resize frame
-            resized_frame = cv2.resize(frame, target_size)
-            out.write(resized_frame)
-        
-        out.release()
-        cap.release()
-        
-        file_size_mb = output_path.stat().st_size / (1024 * 1024)
-        print(f"    Created: {output_path.name} ({file_size_mb:.1f}MB) [OpenCV]")
-    
-    def extract_frame_samples(self, clip_path: str, frame_interval: int) -> None:
-        """Extract frame samples from video clips."""
-        clip_name = Path(clip_path).stem
-        
-        cap = cv2.VideoCapture(clip_path)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        
-        # Create output directory for this clip (includes compression info in name)
-        output_dir = self.samples_dir / f"{clip_name}_every{frame_interval}frames"
-        output_dir.mkdir(exist_ok=True)
-        
-        frame_idx = 0
-        sample_idx = 0
-        
-        print(f"  Extracting frames from {clip_name} (every {frame_interval} frames)")
-        
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+            # Handle corrupted/unreadable frames
+            if not ret or frame is None:
+                corrupted_frames += 1
+                frame_idx += 1
+                frames_in_clip += 1
+                continue
             
-            # Extract frame every W frames
-            if frame_idx % frame_interval == 0:
-                output_path = output_dir / f"frame_{sample_idx:04d}.jpg"
-                cv2.imwrite(str(output_path), frame)
-                sample_idx += 1
+            # Check if we need to start a new clip directory
+            if frames_in_clip >= frames_per_clip:
+                current_clip += 1
+                clip_dir = output_dir / f"{video_name}_clip_{current_clip:03d}"
+                clip_dir.mkdir(exist_ok=True)
+                frames_in_clip = 0
+            
+            # Extract frame at interval
+            if (frame_idx - start_frame) % frame_interval == 0:
+                # Calculate the timestamp for this frame
+                frame_time = frame_idx / video_info['fps']
+                
+                # If current frame is valid, use it
+                if ret and frame is not None and frame.size > 0:
+                    output_path = clip_dir / f"frame_{total_extracted:04d}.jpg"
+                    cv2.imwrite(str(output_path), frame, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                    
+                    # Save metadata if available
+                    if all_metadata:
+                        # Find closest metadata entry to this frame time
+                        closest_metadata = min(all_metadata, key=lambda m: abs(m.timestamp - frame_time))
+                        metadata_path = clip_dir / f"frame_{total_extracted:04d}.json"
+                        self.save_metadata_to_json(closest_metadata, metadata_path)
+                    
+                    total_extracted += 1
+                else:
+                    # Try to get next valid frame (up to 10 attempts)
+                    found_valid = False
+                    for attempt in range(10):
+                        with SuppressStderr():
+                            ret_next, frame_next = cap.read()
+                        
+                        if ret_next and frame_next is not None and frame_next.size > 0:
+                            output_path = clip_dir / f"frame_{total_extracted:04d}.jpg"
+                            cv2.imwrite(str(output_path), frame_next, [cv2.IMWRITE_JPEG_QUALITY, 95])
+                            
+                            # Save metadata if available (for the replacement frame)
+                            if all_metadata:
+                                replacement_time = (frame_idx + attempt) / video_info['fps']
+                                closest_metadata = min(all_metadata, key=lambda m: abs(m.timestamp - replacement_time))
+                                metadata_path = clip_dir / f"frame_{total_extracted:04d}.json"
+                                self.save_metadata_to_json(closest_metadata, metadata_path)
+                            
+                            total_extracted += 1
+                            found_valid = True
+                            corrupted_frames += attempt
+                            frame_idx += attempt
+                            frames_in_clip += attempt
+                            break
+                        else:
+                            corrupted_frames += 1
+                    
+                    if not found_valid:
+                        # Skip this sampling point if no valid frame found
+                        corrupted_frames += 1
             
             frame_idx += 1
+            frames_in_clip += 1
         
         cap.release()
-        print(f"    Extracted {sample_idx} frames to {output_dir.name}/")
+        
+        # Report results
+        success_msg = f"✓ Extracted {total_extracted} frames into {current_clip + 1} clip folders"
+        if corrupted_frames > 0:
+            success_msg += f" ({corrupted_frames} corrupted frames skipped)"
+        print(f"    {success_msg}")
+        
+        return total_extracted
     
-    def process_all_videos(self, clip_duration: int, target_resolution: str, frame_interval: int,
-                          compression_preset: str = 'balanced', target_fps: float = None, 
-                          max_bitrate: str = None):
-        """Process all videos in the raw_inputs directory."""
+    def process_drone_videos(self, drone_dir: Path, output_dir: Path, 
+                            clip_duration: int, frame_interval: int) -> Dict:
+        """Process all videos for one drone."""
+        # Get all video files (case-insensitive)
+        video_files = list(drone_dir.glob("*.MP4")) + list(drone_dir.glob("*.mp4"))
+        
+        if not video_files:
+            print(f"  ⚠ No video files found in {drone_dir}")
+            return {'videos': 0, 'frames': 0}
+        
+        video_files.sort()  # Sort for consistent processing order
+        
+        print(f"\n  Found {len(video_files)} video files")
+        
+        total_frames = 0
+        for video_file in video_files:
+            frames_extracted = self.extract_frames_from_video(
+                str(video_file), 
+                output_dir, 
+                clip_duration, 
+                frame_interval
+            )
+            total_frames += frames_extracted
+        
+        return {
+            'videos': len(video_files),
+            'frames': total_frames,
+            'clips': len(list(output_dir.glob("*_clip_*")))
+        }
+    
+    def process_all(self, clip_duration: int = 10, frame_interval: int = 30,
+                   skip_drone1: bool = False, skip_drone2: bool = False):
+        """Process videos from both drones."""
         print("=" * 70)
-        print("VIDEO PREPROCESSING PIPELINE")
+        print("DUAL-DRONE VIDEO PREPROCESSING PIPELINE")
         print("=" * 70)
         print(f"Parameters:")
         print(f"  Clip duration (X): {clip_duration} seconds")
-        print(f"  Target resolution (Z): {target_resolution}")
         print(f"  Frame interval (W): every {frame_interval} frames")
-        print(f"  Compression preset: {compression_preset}")
-        if target_fps:
-            print(f"  Target FPS: {target_fps}")
-        if max_bitrate:
-            print(f"  Max bitrate: {max_bitrate}")
+        print(f"  Metadata extraction: {'Enabled' if self.extract_metadata else 'Disabled'}")
+        print(f"  Compression: None (maintaining original 1080p quality)")
+        print(f"  JPEG quality: 95%")
+        print("=" * 70)
+        print(f"\nInput directories:")
+        print(f"  Drone1: {self.drone1_dir}")
+        print(f"  Drone2: {self.drone2_dir}")
+        print(f"\nOutput directories:")
+        print(f"  Drone1 frames: {self.drone1_frames_dir}")
+        print(f"  Drone2 frames: {self.drone2_frames_dir}")
         print("=" * 70)
         
-        # Get all video files
-        video_files = list(self.raw_dir.glob("*.mp4"))
-        if not video_files:
-            print("No MP4 files found in raw directory!")
-            return
+        results = {}
         
-        print(f"\nFound {len(video_files)} video files")
+        # Process Drone 1
+        if not skip_drone1:
+            print("\n" + "=" * 70)
+            print("PROCESSING DRONE 1")
+            print("=" * 70)
+            results['drone1'] = self.process_drone_videos(
+                self.drone1_dir,
+                self.drone1_frames_dir,
+                clip_duration,
+                frame_interval
+            )
+        else:
+            print("\n⏭  Skipping Drone 1 (--skip-drone1)")
         
-        # Step 1: Extract clips
-        print("\nSTEP 1: Extracting video clips...")
-        total_size_mb = 0
-        for video_file in video_files:
-            self.extract_video_clips(str(video_file), clip_duration, target_resolution, 
-                                   compression_preset, target_fps, max_bitrate)
+        # Process Drone 2
+        if not skip_drone2:
+            print("\n" + "=" * 70)
+            print("PROCESSING DRONE 2")
+            print("=" * 70)
+            results['drone2'] = self.process_drone_videos(
+                self.drone2_dir,
+                self.drone2_frames_dir,
+                clip_duration,
+                frame_interval
+            )
+        else:
+            print("\n⏭  Skipping Drone 2 (--skip-drone2)")
         
-        # Calculate total size of clips
-        clip_files = list(self.clips_dir.glob("*.mp4"))
-        for clip_file in clip_files:
-            total_size_mb += clip_file.stat().st_size / (1024 * 1024)
-        
-        # Step 2: Extract frame samples
-        print("\nSTEP 2: Extracting frame samples...")
-        for clip_file in clip_files:
-            self.extract_frame_samples(str(clip_file), frame_interval)
-        
+        # Print summary
         print("\n" + "=" * 70)
         print("PREPROCESSING COMPLETE!")
-        print(f"Results:")
-        print(f"  Video clips: {len(clip_files)} files ({total_size_mb:.1f}MB total)")
-        print(f"  Frame samples: {len(list(self.samples_dir.iterdir()))} directories")
-        print(f"  Location: {self.clips_dir} and {self.samples_dir}")
         print("=" * 70)
+        
+        if 'drone1' in results:
+            print(f"\nDrone 1:")
+            print(f"  Videos processed: {results['drone1']['videos']}")
+            print(f"  Frames extracted: {results['drone1']['frames']}")
+            print(f"  Clip folders: {results['drone1']['clips']}")
+            print(f"  Location: {self.drone1_frames_dir}")
+        
+        if 'drone2' in results:
+            print(f"\nDrone 2:")
+            print(f"  Videos processed: {results['drone2']['videos']}")
+            print(f"  Frames extracted: {results['drone2']['frames']}")
+            print(f"  Clip folders: {results['drone2']['clips']}")
+            print(f"  Location: {self.drone2_frames_dir}")
+        
+        total_frames = sum(r['frames'] for r in results.values())
+        total_videos = sum(r['videos'] for r in results.values())
+        
+        print(f"\nTotal:")
+        print(f"  Videos: {total_videos}")
+        print(f"  Frames: {total_frames}")
+        print("=" * 70)
+        
+        return results
+    
+    def clean_output_directories(self):
+        """Remove all extracted frames (useful for re-processing)."""
+        print("\n⚠ Cleaning output directories...")
+        
+        for dir_to_clean in [self.drone1_frames_dir, self.drone2_frames_dir]:
+            if dir_to_clean.exists():
+                shutil.rmtree(dir_to_clean)
+                dir_to_clean.mkdir(parents=True, exist_ok=True)
+                print(f"  ✓ Cleaned: {dir_to_clean}")
+        
+        print("  ✓ Output directories cleaned\n")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Video preprocessing pipeline for person detection")
+    parser = argparse.ArgumentParser(
+        description="Dual-drone video preprocessing pipeline - extract frames from drone1 and drone2",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Extract 1 frame every 30 frames, organize in 10s clips
+  python preprocess_videos.py -X 10 -W 30
+  
+  # Extract every frame (no skipping)
+  python preprocess_videos.py -X 10 -W 1
+  
+  # Extract 1 frame per second (assuming 60fps video)
+  python preprocess_videos.py -X 10 -W 60
+  
+  # Extract frames with metadata
+  python preprocess_videos.py -X 10 -W 60 --extract-metadata
+  
+  # Extract frames without metadata (faster)
+  python preprocess_videos.py -X 10 -W 60 --no-metadata
+  
+  # Process only drone1
+  python preprocess_videos.py --skip-drone2
+  
+  # Clean and re-process
+  python preprocess_videos.py --clean -X 10 -W 30
+        """
+    )
+    
     parser.add_argument("-X", "--clip-duration", type=int, default=10,
-                       help="Clip duration in seconds (default: 10)")
-    parser.add_argument("-Z", "--resolution", type=str, default="720p", 
-                       choices=list(RESOLUTIONS.keys()),
-                       help="Target resolution (default: 720p)")
+                       help="Clip duration in seconds for organizing frames (default: 10)")
     parser.add_argument("-W", "--frame-interval", type=int, default=30,
                        help="Frame sampling interval - extract 1 frame every W frames (default: 30)")
     
-    # Compression parameters
-    parser.add_argument("-C", "--compression", type=str, default="balanced",
-                       choices=['high_quality', 'balanced', 'compressed', 'very_compressed'],
-                       help="Compression preset: high_quality, balanced, compressed, very_compressed (default: balanced)")
-    parser.add_argument("-F", "--fps", type=float, default=None,
-                       help="Target FPS (reduces from original if lower, saves space)")
-    parser.add_argument("-B", "--max-bitrate", type=str, default=None,
-                       help="Maximum bitrate (e.g., '2M', '1000k') - limits file size")
-    
     # Directory parameters
-    parser.add_argument("--raw", type=str, default="inputs/raw",
-                       help="Raw videos directory (default: inputs/raw)")
-    parser.add_argument("--clips", type=str, default="inputs/clips",
-                       help="Processed clips directory (default: inputs/clips)")
-    parser.add_argument("--samples", type=str, default="inputs/samples",
-                       help="Frame samples directory (default: inputs/samples)")
+    parser.add_argument("--input-dir", type=str, default="inputs",
+                       help="Input directory containing drone1/ and drone2/ folders (default: inputs)")
+    parser.add_argument("--output-dir", type=str, default=None,
+                       help="Output base directory (default: same as input-dir)")
+    
+    # Metadata extraction
+    parser.add_argument("--extract-metadata", action="store_true", default=True,
+                       help="Extract drone metadata (GPS, orientation, camera settings) - default: enabled")
+    parser.add_argument("--no-metadata", action="store_true",
+                       help="Skip metadata extraction (faster processing)")
+    
+    # Processing options
+    parser.add_argument("--skip-drone1", action="store_true",
+                       help="Skip processing drone1 videos")
+    parser.add_argument("--skip-drone2", action="store_true",
+                       help="Skip processing drone2 videos")
+    parser.add_argument("--clean", action="store_true",
+                       help="Clean output directories before processing")
     
     args = parser.parse_args()
     
-    # Validate bitrate format if provided
-    if args.max_bitrate and not (args.max_bitrate.endswith('k') or args.max_bitrate.endswith('M')):
-        print("Error: Bitrate must end with 'k' or 'M' (e.g., '1000k', '2M')")
-        return
+    # Resolve metadata extraction flag
+    extract_metadata = args.extract_metadata and not args.no_metadata
     
-    # Create preprocessor
-    preprocessor = VideoPreprocessor(args.raw, args.clips, args.samples)
+    try:
+        # Create preprocessor
+        preprocessor = DualDronePreprocessor(args.input_dir, args.output_dir, extract_metadata)
+        
+        # Clean if requested
+        if args.clean:
+            preprocessor.clean_output_directories()
+        
+        # Process all videos
+        preprocessor.process_all(
+            clip_duration=args.clip_duration,
+            frame_interval=args.frame_interval,
+            skip_drone1=args.skip_drone1,
+            skip_drone2=args.skip_drone2
+        )
+        
+    except FileNotFoundError as e:
+        print(f"\n❌ Error: {e}")
+        print("Please ensure your directory structure is:")
+        print("  inputs/")
+        print("    drone1/")
+        print("      video1.MP4")
+        print("      video2.MP4")
+        print("    drone2/")
+        print("      video1.MP4")
+        print("      video2.MP4")
+        return 1
     
-    # Process all videos
-    preprocessor.process_all_videos(args.clip_duration, args.resolution, args.frame_interval,
-                                  args.compression, args.fps, args.max_bitrate)
+    except Exception as e:
+        print(f"\n❌ Unexpected error: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
+    
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    exit(main())
