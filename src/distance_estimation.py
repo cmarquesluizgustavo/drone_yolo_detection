@@ -2,6 +2,7 @@ import math
 import numpy as np
 from geoconverter import GeoConverter
 from scipy.optimize import least_squares
+from numpy.linalg import norm
 
 class Camera:
     """
@@ -62,7 +63,7 @@ class Camera:
 
         return camera_height_m / math.tan(math.radians(alpha_deg))
 
-    def calculate_bearing(camera_yaw_deg, x_pixel, image_width):
+    def calculate_bearing(self, camera_yaw_deg, x_pixel, image_width):
 
         delta_px = x_pixel - (image_width / 2.0)
 
@@ -76,7 +77,7 @@ class Camera:
 
         return GeoConverter.polar_to_geo(
             camera_lat,
-            canera_lon,
+            camera_lon,
             bearing_deg,
             distance_m
         )
@@ -89,8 +90,8 @@ class Camera:
         b1 = math.radians(bearing1_deg)
         b2 = math.radians(bearing2_deg)
 
-        x1, y1 = Converter.geo_to_xy(lat1, lon1)
-        x2, y2 = Converter.geo_to_xy(lat2, lon2)
+        x1, y1 = GeoConverter.geo_to_xy(lat1, lon1)
+        x2, y2 = GeoConverter.geo_to_xy(lat2, lon2)
 
         def residuals(p):
             x, y = p
@@ -114,11 +115,11 @@ class Camera:
 
         result = least_squares(residuals, [x0, y0])
 
-        lat, lon = Converter.xy_to_geo(result.x[0], result.x[1])
+        lat, lon = GeoConverter.xy_to_geo(result.x[0], result.x[1])
         return lat, lon
 
-    def bearing_from_position: camera_pos,camera_pos):
-    
+    def bearing_from_position(camera_pos, target_pos):
+
         dx = target_pos[0] - camera_pos[0]
         dy = target_pos[1] - camera_pos[1]
 
@@ -128,4 +129,4 @@ class Camera:
         return bearing_deg
 
     def distance_from_position(camera_pos, target_pos):
-        return float(np.linalg.norm(target_pos - camera_pos))
+        return float(norm(target_pos - camera_pos))

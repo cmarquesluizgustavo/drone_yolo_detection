@@ -1,3 +1,6 @@
+import math
+from pyproj import proj
+
 class GeoConverter:
 
     @staticmethod
