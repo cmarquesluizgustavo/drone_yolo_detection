@@ -1,5 +1,6 @@
 import math
 import numpy as np
+from geoconverter import GeoConverter
 
 class Camera:
     """
@@ -59,3 +60,22 @@ class Camera:
             return None
 
         return camera_height_m / math.tan(math.radians(alpha_deg))
+
+    def calculate_bearing(camera_yaw_deg, x_pixel, image_width):
+
+        delta_px = x_pixel - (image_width / 2.0)
+
+        delta_angle = (delta_px / (image_width / 2.0)) * (self.horizontal_fov_deg / 2.0)
+
+        bearing_deg = camera_yaw_deg + delta_angle
+
+        return (bearing_deg + 360.0) % 360.0
+
+    def extract_geoposition(camera_lat, camera_lon, bearing_deg, distance_m):
+
+        return GeoConverter.polar_to_geo(
+            camera_lat,
+            canera_lon,
+            bearing_deg,
+            distance_m
+        )
