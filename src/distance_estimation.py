@@ -116,3 +116,15 @@ class Camera:
 
         lat, lon = Converter.xy_to_geo(result.x[0], result.x[1])
         return lat, lon
+
+    def estimations_after_fusion(drone_pos, target_pos):
+
+        dx = target_pos[0] - drone_pos[0]
+        dy = target_pos[1] - drone_pos[1]
+
+        distance_m = float(np.hypot(dx, dy))
+
+        bearing_rad = math.atan2(dx, dy)
+        bearing_deg = (math.degrees(bearing_rad) + 360.0) % 360.0
+
+        return distance_m, bearing_deg
