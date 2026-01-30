@@ -9,7 +9,7 @@ import cv2
 import os
 import numpy as np
 from pathlib import Path
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict
 from detection_pipeline import DetectionPipeline
 from dual_drone_fusion import DualDroneFusion, FrameSynchronizer, Detection, DroneState
 
@@ -84,7 +84,7 @@ class DualDroneDetectionPipeline:
             input_dir_drone1: Base directory containing drone 1 samples
             input_dir_drone2: Base directory containing drone 2 samples
             output_base_dir: Base output directory
-            filter_clips: If True, only process clips 0, 2, and 7
+            filter_clips: If True, only process clips 0, 2, and 7 (0,45,-45)
         """
         # Get sample directories from both drones
         all_samples_drone1 = [d for d in os.listdir(input_dir_drone1)

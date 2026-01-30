@@ -1,21 +1,20 @@
 import math
-import numpy as np
 from geoconverter import GeoConverter
 from scipy.optimize import least_squares
-from numpy.linalg import norm
+
+"""
+Camera model for Autel Robotics EVO 2 Dual V2
+
+Specs:
+- Image Sensor: 1/2" CMOS (6.4mm x 4.8mm)
+- Pixels: 48MP (Still), Multiple video resolutions available
+- Perspective (HFOV): 79°
+- Lens EFL: 25.6 mm
+- Aperture: f/2.8–f/11
+- Video Resolution: 8K/6K/4K/2.7K/1080P at various framerates
+"""
 
 class Camera:
-    """
-    Camera model for Autel Robotics EVO 2 Dual V2
-    
-    Specs:
-    - Image Sensor: 1/2" CMOS (6.4mm x 4.8mm)
-    - Pixels: 48MP (Still), Multiple video resolutions available
-    - Perspective (HFOV): 79°
-    - Lens EFL: 25.6 mm
-    - Aperture: f/2.8–f/11
-    - Video Resolution: 8K/6K/4K/2.7K/1080P at various framerates
-    """
     def __init__(self, sensor_width_mm=6.4, sensor_height_mm=4.8,
                  focal_35mm_mm=25.6, image_width_px=1920, image_height_px=1080):
         
@@ -32,7 +31,7 @@ class Camera:
         self.pixel_size_y_mm = sensor_height_mm / image_height_px
         
         # Calculate actual focal length from 35mm equivalent
-        self.diag_sensor_mm = np.sqrt(sensor_width_mm**2 + sensor_height_mm**2)
+        self.diag_sensor_mm = math.sqrt(sensor_width_mm**2 + sensor_height_mm**2)
         self.diag_35mm_mm = 43.27  # diagonal of 35mm sensor
         self.crop_factor = self.diag_35mm_mm / self.diag_sensor_mm
         self.focal_length_mm = self.focal_35mm_mm / self.crop_factor
@@ -82,10 +81,7 @@ class Camera:
             distance_m
         )
 
-    def extract_geoposition_dual_drone(
-        lat1, lon1, distance1_m, bearing1_deg,
-        lat2, lon2, distance2_m, bearing2_deg
-    ):
+    def extract_geoposition_dual_drone(lat1, lon1, distance1_m, bearing1_deg, lat2, lon2, distance2_m, bearing2_deg):
 
         b1 = math.radians(bearing1_deg)
         b2 = math.radians(bearing2_deg)
@@ -118,15 +114,22 @@ class Camera:
         lat, lon = GeoConverter.xy_to_geo(result.x[0], result.x[1])
         return lat, lon
 
-    def bearing_from_position(camera_pos, target_pos):
+    def bearing_from_position(camera_lat, camera_lon, target_lat, target_lon):
 
-        dx = target_pos[0] - camera_pos[0]
-        dy = target_pos[1] - camera_pos[1]
+        camera_x, camera_y = GeoConverter.geo_to_xy(camera_lat, camera_lon)
+        target_x, target_y = GeoConverter.geo_to_xy(target_lat, target_lon)
+
+        dx = target_x - camera_x
+        dy = target_y - camera_y
 
         bearing_rad = math.atan2(dx, dy)
         bearing_deg = (math.degrees(bearing_rad) + 360.0) % 360.0
 
         return bearing_deg
 
-    def distance_from_position(camera_pos, target_pos):
-        return float(norm(target_pos - camera_pos))
+    def distance_from_position(camera_lat, camera_lon, target_lat, target_lon):
+        
+        camera_x, camera_y = GeoConverter.geo_to_xy(camera_lat, camera_lon)
+        target_x, target_y = GeoConverter.geo_to_xy(target_lat, target_lon)
+
+        return float(math.hypot(target_x - camera_x, target_y - camera_y))

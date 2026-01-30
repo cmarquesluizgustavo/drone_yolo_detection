@@ -40,7 +40,7 @@ def main():
     parser.add_argument('--no-weapons', action='store_true',
                        help='Disable weapon detection in person crops')
     parser.add_argument('--filter-clips', action='store_true',
-                       help='Process only clips 0, 2, and 7 (clip_000, clip_002, clip_007)')
+                       help='Process only clips 0, 2, and 7 (clip_000, clip_002, clip_007)') # (0,45,-45)
     parser.add_argument('--dual-drone', action='store_true',
                        help='Enable dual-drone mode with two input directories')
     parser.add_argument('--input-drone1', default=None,

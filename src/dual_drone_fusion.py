@@ -1,16 +1,5 @@
-"""
-Dual-Drone Detection Fusion Module
-
-Implements multi-view fusion strategies for cooperative aerial detection:
-- Cross-drone detection matching and identity association
-- Probabilistic confidence fusion
-- Distance triangulation and fusion
-- Ground-plane coordinate projection
-"""
-
-import numpy as np
 import math
-from typing import List, Dict, Tuple, Optional
+from typing import Dict, Tuple
 from dataclasses import dataclass
 
 
@@ -20,7 +9,7 @@ class DroneState:
     gps_lat: float
     gps_lon: float
     altitude_m: float
-    yaw_deg: float
+    yaw_deg: float = 0.0
     pitch_deg: float = 0.0
     roll_deg: float = 0.0
     
@@ -43,151 +32,25 @@ class Detection:
 
 
 class DualDroneFusion:
-    """
-    Handles fusion of detections from two drones.
-    
-    Implements:
-    - Spatial association in ground-plane coordinates
-    - Probabilistic confidence fusion
-    - Distance triangulation from bearing angles
-    - Distance averaging for consistent estimates
-    """
-    
-    def __init__(self, association_distance_threshold_m: float = 2.0):
-        """
-        Initialize the dual-drone fusion system.
+    """Handles fusion of detections from two drones."""
+
+    def __init__(self, association_threshold_m = 2.0):
+        # maximum distance between detections to be considered the same target
+        self.association_threshold_m = association_threshold_m
         
-        Args:
-            association_distance_threshold_m: Maximum distance (meters) between 
-                detections to be considered the same target
-        """
-        self.association_threshold = association_distance_threshold_m
-        
-    def fuse_confidence(self, conf1: float, conf2: float, 
-                       weight1: float = 1.0, weight2: float = 1.0) -> float:
+    def fuse_confidence(self, conf1, conf2) -> float:
         """
         Fuse confidence scores using probabilistic evidence accumulation.
         
         Under assumption of conditional independence:
         c_fused = 1 - (1 - c1)(1 - c2)
-        
-        Optional weights can account for view quality differences.
-        
-        Args:
-            conf1: Confidence from drone 1
-            conf2: Confidence from drone 2
-            weight1: Quality weight for drone 1
-            weight2: Quality weight for drone 2
-            
-        Returns:
-            Fused confidence score
         """
-        # Normalize weights
-        total_weight = weight1 + weight2
-        w1 = weight1 / total_weight
-        w2 = weight2 / total_weight
-        
-        # Apply weighted probabilistic fusion
+
         # Weighted version: c_f = 1 - (1-c1)^w1 * (1-c2)^w2
-        fused = 1 - ((1 - conf1) ** w1) * ((1 - conf2) ** w2)
-        
-        return fused
-    
-    def fuse_distance_average(self, dist1: float, dist2: float) -> float:
-        """
-        Simple arithmetic mean of distance estimates.
-        
-        Args:
-            dist1: Distance from drone 1
-            dist2: Distance from drone 2
-            
-        Returns:
-            Averaged distance
-        """
-        return (dist1 + dist2) / 2.0
-    
-    def triangulate_position(self, drone1_state: DroneState, bearing1_deg: float,
-                            drone2_state: DroneState, bearing2_deg: float) -> Optional[Tuple[float, float]]:
-        """
-        Triangulate target position from two drone bearings.
-        
-        Uses least-squares ray intersection in ground plane.
-        
-        Args:
-            drone1_state: State of drone 1
-            bearing1_deg: Bearing angle from drone 1 to target
-            drone2_state: State of drone 2
-            bearing2_deg: Bearing angle from drone 2 to target
-            
-        Returns:
-            (x, y) position in ground plane, or None if rays are nearly parallel
-        """
-        # Convert bearings to radians
-        theta1 = math.radians(bearing1_deg)
-        theta2 = math.radians(bearing2_deg)
-        
-        # Drone positions (for now, use simplified local coordinates)
-        # In real implementation, convert GPS to local UTM
-        p1 = np.array([0.0, 0.0])  # Drone 1 at origin (simplified)
-        
-        # For now, assume drone 2 position is known relative to drone 1
-        # This would normally come from GPS coordinate conversion
-        # Placeholder: assume 10m separation
-        p2 = np.array([10.0, 0.0])
-        
-        # Direction vectors
-        d1 = np.array([np.sin(theta1), np.cos(theta1)])
-        d2 = np.array([np.sin(theta2), np.cos(theta2)])
-        
-        # Check if rays are nearly parallel
-        cross = np.cross(d1, d2)
-        if abs(cross) < 1e-6:
-            return None
-        
-        # Solve for intersection using parametric line equations
-        # p1 + t1*d1 = p2 + t2*d2
-        # Rearrange: t1*d1 - t2*d2 = p2 - p1
-        
-        A = np.column_stack([d1, -d2])
-        b = p2 - p1
-        
-        try:
-            params = np.linalg.solve(A, b)
-            t1 = params[0]
-            
-            # Compute intersection point
-            intersection = p1 + t1 * d1
-            
-            return float(intersection[0]), float(intersection[1])
-        except np.linalg.LinAlgError:
-            return None
-    
-    def compute_distance_from_position(self, drone_pos: np.ndarray, 
-                                       target_pos: np.ndarray) -> float:
-        """
-        Compute distance from drone to target in ground plane.
-        
-        Args:
-            drone_pos: Drone position (x, y)
-            target_pos: Target position (x, y)
-            
-        Returns:
-            Euclidean distance
-        """
-        return float(np.linalg.norm(target_pos - drone_pos))
-    
-    def associate_detections(self, detections1: List[Detection], 
-                            detections2: List[Detection]) -> List[Dict]:
-        """
-        Associate detections from two drones based on ground-plane proximity.
-        
-        Args:
-            detections1: Detections from drone 1
-            detections2: Detections from drone 2
-            
-        Returns:
-            List of fused detection dictionaries
-        """
+        return 1 - (1 - conf1) * (1 - conf2)
+
+    def associate_detections(self, detections1, detections2):
+        """Associate detections from two drones based on ground-plane proximity."""
         fused_detections = []
         used_det2 = set()
         
@@ -228,16 +91,7 @@ class DualDroneFusion:
         return fused_detections
     
     def _fuse_detection_pair(self, det1: Detection, det2: Detection) -> Dict:
-        """
-        Fuse a pair of matched detections.
-        
-        Args:
-            det1: Detection from drone 1
-            det2: Detection from drone 2
-            
-        Returns:
-            Fused detection dictionary
-        """
+        """Fuse a pair of matched detections."""
         # Fuse confidence
         fused_conf = self.fuse_confidence(det1.confidence, det2.confidence)
         
@@ -302,17 +156,12 @@ class FrameSynchronizer:
     
     Handles temporal alignment based on timestamps or frame indices.
     """
-    
-    def __init__(self, max_time_diff_ms: float = 100):
-        """
-        Initialize frame synchronizer.
-        
-        Args:
-            max_time_diff_ms: Maximum time difference (milliseconds) to consider frames synchronized
-        """
+
+    def __init__(self, max_time_diff_ms=100):
+        # maximum time difference (milliseconds) to consider frames synchronized
         self.max_time_diff = max_time_diff_ms
-        
-    def synchronize_by_frame_index(self, frames1: List[str], frames2: List[str]) -> List[Tuple[str, str]]:
+
+    def synchronize_by_frame_index(self, frames1, frames2):
         """
         Synchronize frames by matching frame indices/numbers.
         
