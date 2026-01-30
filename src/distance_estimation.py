@@ -1,6 +1,7 @@
 import math
 import numpy as np
 from geoconverter import GeoConverter
+from scipy.optimize import least_squares
 
 class Camera:
     """
@@ -79,3 +80,39 @@ class Camera:
             bearing_deg,
             distance_m
         )
+
+    def extract_geoposition_dual_drone(
+        lat1, lon1, distance1_m, bearing1_deg,
+        lat2, lon2, distance2_m, bearing2_deg
+    ):
+
+        b1 = math.radians(bearing1_deg)
+        b2 = math.radians(bearing2_deg)
+
+        x1, y1 = Converter.geo_to_xy(lat1, lon1)
+        x2, y2 = Converter.geo_to_xy(lat2, lon2)
+
+        def residuals(p):
+            x, y = p
+
+            distance_res_1 = math.hypot(x - x1, y - y1) - distance1_m
+            distance_res_2 = math.hypot(x - x2, y - y2) - distance2_m
+
+       
+            bearing_res_1 = math.atan2(x - x1, y - y1) - b1
+            bearing_res_2 = math.atan2(x - x2, y - y2) - b2
+
+            return [
+                distance_res_1,
+                bearing_res_1,
+                distance_res_2,
+                bearing_res_2
+            ]
+
+        x0 = (x1 + x2) / 2.0
+        y0 = (y1 + y2) / 2.0
+
+        result = least_squares(residuals, [x0, y0])
+
+        lat, lon = Converter.xy_to_geo(result.x[0], result.x[1])
+        return lat, lon
