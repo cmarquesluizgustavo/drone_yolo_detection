@@ -57,21 +57,34 @@ class VideoPreprocessor:
         return entries
 
     def parse_telemetry_text(self, text):
-        """Parse the telemetry text block into structured fields."""
+        """Parse the telemetry text block into structured fields.
+        
+        Note: The SRT files use W/S labels, but based on the coordinate values,
+        they appear to represent latitude/longitude respectively.
+        We rename them to use standard geographic naming conventions.
+        """
         import re
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         result = {}
         for line in lines:
             # HOME(W: 43.186691, S: 22.820683) 2026-01-30 11:31:11
+            # Note: W appears to be latitude, S appears to be longitude based on values
             m = re.match(r'HOME\(W: ([\d.\-]+), S: ([\d.\-]+)\)\s+([\d\-]+ [\d:]+)', line)
             if m:
-                result['home'] = {'W': float(m.group(1)), 'S': float(m.group(2))}
+                result['home'] = {
+                    'latitude': float(m.group(1)), 
+                    'longitude': float(m.group(2))
+                }
                 result['datetime'] = m.group(3)
                 continue
             # GPS(W: 43.186745, S: 22.820713, 21.31m)
             m = re.match(r'GPS\(W: ([\d.\-]+), S: ([\d.\-]+), ([\d.\-]+)m\)', line)
             if m:
-                result['gps'] = {'W': float(m.group(1)), 'S': float(m.group(2)), 'height_m': float(m.group(3))}
+                result['gps'] = {
+                    'latitude': float(m.group(1)), 
+                    'longitude': float(m.group(2)), 
+                    'altitude_m': float(m.group(3))
+                }
                 continue
             # ISO:100 SHUTTER:500 EV:0.0 F-NUM:1.8
             m = re.match(r'ISO:(\d+) SHUTTER:([\d.]+) EV:([\d.\-]+) F-NUM:([\d.]+)', line)
@@ -84,8 +97,8 @@ class VideoPreprocessor:
             # F.PRY (0.7°, -1.1°, -145.5°), G.PRY (-10.0°, 0.0°, -148.2°)
             m = re.match(r'F\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\), G\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\)', line)
             if m:
-                result['fpry'] = {'roll': float(m.group(1)), 'pitch': float(m.group(2)), 'yaw': float(m.group(3))}
-                result['gpry'] = {'roll': float(m.group(4)), 'pitch': float(m.group(5)), 'yaw': float(m.group(6))}
+                result['fpry'] = {'pitch': float(m.group(1)), 'roll': float(m.group(2)), 'yaw': float(m.group(3))}
+                result['gpry'] = {'pitch': float(m.group(4)), 'roll': float(m.group(5)), 'yaw': float(m.group(6))}
                 continue
             # If not matched, store as extra
             if 'extra' not in result:
@@ -395,8 +408,8 @@ class VideoPreprocessor:
         print(f"  Parallel workers: {num_workers}")
         print("=" * 70)
 
-        # Recursively get all video files
-        video_files = list(self.raw_dir.rglob("*.mp4"))
+        # Recursively get all video files (case-insensitive)
+        video_files = list(self.raw_dir.rglob("*.mp4")) + list(self.raw_dir.rglob("*.MP4"))
         if not video_files:
             print("No MP4 files found in raw directory!")
             return
@@ -424,12 +437,12 @@ def main():
     parser = argparse.ArgumentParser(description="Video preprocessing pipeline for person detection")
     parser.add_argument("-X", "--clip-duration", type=int, default=10,
                        help="Clip duration in seconds (default: 10)")
-    parser.add_argument("-Z", "--resolution", type=str, default="720p", 
+    parser.add_argument("-Z", "--resolution", type=str, default="1080p", 
                        choices=list(RESOLUTIONS.keys()),
-                       help="Target resolution (default: 720p)")
-    parser.add_argument("-W", "--frame-interval", type=int, default=30,
-                       help="Frame sampling interval - extract 1 frame every W frames (default: 30)")
-    
+                       help="Target resolution (default: 1080p)")
+    parser.add_argument("-W", "--frame-interval", type=int, default=60,
+                       help="Frame sampling interval - extract 1 frame every W frames (default: 60)")
+
     # Compression parameters
     parser.add_argument("-C", "--compression", type=str, default="balanced",
                        choices=['high_quality', 'balanced', 'compressed', 'very_compressed'],
