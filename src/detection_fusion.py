@@ -1,5 +1,5 @@
 import math
-from typing import Dict, Tuple
+from typing import Tuple
 from dataclasses import dataclass
 
 
@@ -15,21 +15,40 @@ class Detection:
     lon: float
     drone_id: int
     frame_id: int
+    weapon_confidence: float
     has_weapon: bool = False
-    weapon_confidence: float = 0.0
 
 
 class DualDroneFusion:
     """Handles fusion of detections from two drones."""
 
-    def __init__(self, association_threshold_m = 2.0):
+    def __init__(self, association_threshold_m, weapon_threshold=0.5):
         # maximum distance between detections to be considered the same target
         self.association_threshold_m = association_threshold_m
+        self.weapon_threshold = weapon_threshold
         
     def fuse_confidence(self, conf1, conf2):
         """probabilistic evidence accumulation!"""
-        # Weighted version: c_f = 1 - (1-c1)^w1 * (1-c2)^w2
+        # c_f = 1 - (1-c1)^w1 * (1-c2)^w2
         return 1 - (1 - conf1) * (1 - conf2)
+    
+    def detection_to_dict(self, det):
+        """Convert a Detection dataclass object to a dictionary."""
+        return {
+            'bbox': det.bbox,
+            'person_confidence': det.person_confidence,
+            'distance_m': det.distance_m,
+            'bearing_deg': det.bearing_deg,
+            'x': det.x,
+            'y': det.y,
+            'lat': det.lat,
+            'lon': det.lon,
+            'has_weapon': det.has_weapon,
+            'weapon_confidence': det.weapon_confidence,
+            'source': f'drone{det.drone_id}',
+            'drone_id': det.drone_id,
+            'frame_id': det.frame_id
+        }
 
     def match_detections(self, detections1, detections2):
         """Associate detections from two drones based on ground-plane proximity."""
@@ -72,27 +91,18 @@ class DualDroneFusion:
         
         return fused_detections
     
-    def fuse_detections(self, det1, det2, weapon_threshold=0.2):
-        """Fuse a pair of matched detections."""
-        # Fuse confidence
+    def fuse_detections(self, det1, det2):
+        """Fuse two detections using probabilistic confidence fusion."""
         fused_conf = self.fuse_confidence(det1.person_confidence, det2.person_confidence)
         fused_weapon_conf = self.fuse_confidence(det1.weapon_confidence, det2.weapon_confidence)
-        has_weapon = fused_weapon_conf > weapon_threshold
-        
-        # Average ground position
-        fused_x = (det1.x + det2.x) / 2.0
-        fused_y = (det1.y + det2.y) / 2.0
-        
-        # Average GPS (simple approach)
-        fused_lat = (det1.lat + det2.lat) / 2.0
-        fused_lon = (det1.lon + det2.lon) / 2.0
+        has_weapon = fused_weapon_conf > self.weapon_threshold
         
         return {
             'person_confidence': fused_conf,
-            'x': fused_x,
-            'y': fused_y,
-            'lat': fused_lat,
-            'lon': fused_lon,
+            'x': 0.0,
+            'y': 0.0,
+            'lat': 0.0,
+            'lon': 0.0,
             'has_weapon': has_weapon,
             'weapon_confidence': fused_weapon_conf,
             'source': 'fused',
@@ -101,51 +111,3 @@ class DualDroneFusion:
             'bbox_drone1': det1.bbox,
             'bbox_drone2': det2.bbox
         }
-    
-    def detection_to_dict(self, det):
-        """Convert a single Detection to dictionary format."""
-        return {
-            'person_confidence': det.person_confidence,
-            'x': det.x,
-            'y': det.y,
-            'lat': det.lat,
-            'lon': det.lon,
-            'has_weapon': det.has_weapon,
-            'weapon_confidence': det.weapon_confidence,
-            'source': f'drone{det.drone_id}',
-            'drone_ids': [det.drone_id],
-            'frame_id': det.frame_id,
-            'bbox': det.bbox
-        }
-
-
-class FrameSynchronizer:
-
-    def __init__(self, max_time_diff_ms=100):
-        # maximum time difference (milliseconds) to consider frames synchronized
-        self.max_time_diff = max_time_diff_ms
-
-    def synchronize_by_frame_index(self, frames1, frames2):
-        # Extract frame numbers from filenames
-        def extract_frame_num(path: str) -> int:
-            import re
-            # Look for patterns like _0000 or frame_000 in filename
-            basename = path.split('/')[-1].split('\\')[-1]
-            matches = re.findall(r'_(\d{4})', basename)
-            if matches:
-                return int(matches[-1])  # Take last match
-            matches = re.findall(r'(\d{4})', basename)
-            if matches:
-                return int(matches[-1])
-            return -1
-        
-        # Build frame index maps
-        frames1_dict = {extract_frame_num(f): f for f in frames1}
-        frames2_dict = {extract_frame_num(f): f for f in frames2}
-        
-        # Find common frame indices
-        common_indices = sorted(set(frames1_dict.keys()) & set(frames2_dict.keys()))
-        
-        synchronized_pairs = [(frames1_dict[idx], frames2_dict[idx]) for idx in common_indices]
-        
-        return synchronized_pairs

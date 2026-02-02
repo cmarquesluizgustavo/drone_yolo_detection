@@ -1,8 +1,3 @@
-"""
-Detection Pipeline for Processing Multiple Images
-Orchestrates batch processing of images using the PeopleDetector.
-"""
-
 import cv2
 import os
 from pathlib import Path
@@ -20,8 +15,8 @@ except ImportError:
 class DetectionPipeline:
     """Pipeline for batch processing images with people and weapon detection."""
     
-    def __init__(self, model_path: str, person_confidence_threshold: float = 0.4, 
-                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.2, 
+    def __init__(self, model_path: str, person_confidence_threshold: float = 0.5, 
+                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.5, 
                  sample_majority_threshold: int = 1):
         """
         Initialize the detection pipeline.
@@ -54,12 +49,7 @@ class DetectionPipeline:
         for i, detection in enumerate(detections_info):
             x1, y1, x2, y2 = detection['bbox']
             person_confidence = detection.get('person_confidence', detection.get('confidence'))
-            
-            # Add padding to the bounding box
-            try:
-                padding = CROP_PADDING
-            except NameError:
-                padding = 0.1  # Default fallback
+            padding = 0.1
                 
             width = x2 - x1
             height = y2 - y1
@@ -84,8 +74,6 @@ class DetectionPipeline:
                 'person_id': i + 1,
                 'bbox': detection['bbox'],
                 'padded_bbox': [x1_pad, y1_pad, x2_pad, y2_pad],
-                # Keep both keys for backward/forward compatibility across pipelines.
-                'confidence': person_confidence,
                 'person_confidence': person_confidence,
                 'crop_size': (crop_width, crop_height)
             }
@@ -101,18 +89,10 @@ class DetectionPipeline:
     
     def draw_boxes_on_image(self, image, detections_info, weapon_results=None):
         result_image = image.copy()
-        
-        try:
-            box_color = BOX_COLOR
-            box_thickness = BOX_THICKNESS
-            font_scale = FONT_SCALE
-            font_thickness = FONT_THICKNESS
-        except NameError:
-            box_color = (0, 255, 0)
-            box_thickness = 2
-            font_scale = 0.5
-            font_thickness = 2
-        
+        box_thickness = 2
+        font_scale = 0.5
+        font_thickness = 2
+    
         # Draw person boxes in GREEN
         for detection in detections_info:
             x1, y1, x2, y2 = detection['bbox']
@@ -145,19 +125,14 @@ class DetectionPipeline:
         
         # Draw weapon boxes in RED (if any detected)
         if weapon_results:
-            result_image = self._draw_weapon_boxes(result_image, weapon_results)
+            result_image = self.draw_weapon_boxes(result_image, weapon_results)
         
         return result_image
-    
-    def _draw_weapon_boxes(self, image, weapon_results):
-        try:
-            box_thickness = BOX_THICKNESS
-            font_scale = FONT_SCALE
-            font_thickness = FONT_THICKNESS
-        except NameError:
-            box_thickness = 2
-            font_scale = 0.5
-            font_thickness = 2
+
+    def draw_weapon_boxes(self, image, weapon_results):
+        box_thickness = 2
+        font_scale = 0.5
+        font_thickness = 2
             
         for result in weapon_results:
             if result['has_weapons'] and result['weapon_detections']:
@@ -174,8 +149,8 @@ class DetectionPipeline:
                     # Translate to full image coordinates
                     full_wx1 = int(x1_pad + wx1)
                     full_wy1 = int(y1_pad + wy1)
-                    full_wx2 = int(x1_pad + wx2)
-                    full_wy2 = int(y1_pad + wy2)
+                    full_wx2 = int(x2_pad + wx2)
+                    full_wy2 = int(y2_pad + wy2)
                     
                     # Draw RED box for weapon
                     weapon_box_color = (0, 0, 255)  # Red for weapon
@@ -199,12 +174,7 @@ class DetectionPipeline:
         for i, detection in enumerate(detections_info):
             x1, y1, x2, y2 = detection['bbox']
             confidence = detection.get('confidence', detection.get('person_confidence'))
-            
-            # Add padding to the bounding box
-            try:
-                padding = CROP_PADDING
-            except NameError:
-                padding = 0.1  # Default fallback
+            padding = 0.1  # Default fallback
                 
             width = x2 - x1
             height = y2 - y1
@@ -220,11 +190,8 @@ class DetectionPipeline:
             # Check minimum size
             crop_width = x2_pad - x1_pad
             crop_height = y2_pad - y1_pad
-            
-            try:
-                min_size = CROP_MIN_SIZE
-            except NameError:
-                min_size = 32  # Default fallback
+
+            min_size = 32  # Default fallback
                 
             if crop_width < min_size or crop_height < min_size:
                 continue  # Skip crops that are too small
@@ -323,20 +290,14 @@ class DetectionPipeline:
                 _, detections = self.detector.detect_people(image_path, draw_boxes=False)
 
                 # Extract testing-time condition metadata from filenames (used for RMSE comparisons).
-                file_meta = self.detector.extract_filename_metadata(image_path)
-                real_distance = file_meta.get('distance_m')
-                camera_height_annotated = file_meta.get('height_m')
-                camera_pitch_annotated_deg = file_meta.get('camera_pitch_deg')
-                sample_class = file_meta.get('sample_class') or ('real' if dir_name.lower().startswith('real') else 'falso')
+                file_data = self.detector.extract_filename_metadata(image_path)
+                real_distance = file_data.get('distance_m')
+                camera_height_annotated = file_data.get('height_m')
+                camera_pitch_annotated_deg = file_data.get('camera_pitch_deg')
+                sample_class = file_data.get('sample_class') or ('real' if dir_name.lower().startswith('real') else 'falso')
 
-                # Use real camera pitch from drone metadata (JSON) when available.
+                # No real camera pitch since we're not using telemetry
                 camera_pitch_real_deg = None
-                if getattr(self.detector, 'camera', None) is not None:
-                    try:
-                        if self.detector.camera.load_from_json(image_path):
-                            camera_pitch_real_deg = self.detector.camera.pitch_deg
-                    except Exception:
-                        camera_pitch_real_deg = None
                 
                 # Extract person crops for weapon detection
                 person_crops = []
@@ -486,10 +447,6 @@ class DetectionPipeline:
         # Clean up empty weapon detection directories
         self._cleanup_empty_weapon_directories(output_base_dir)
    
-    
-        
-
-
     def _organize_sample_output(self, temp_dir: str, detections_dir: str, crops_dir: str):
         import os    
         import shutil
@@ -546,9 +503,6 @@ class DetectionPipeline:
 
     
     def _cleanup_empty_weapon_directories(self, output_base_dir: str):
-        """
-        Remove empty weapon detection directories after processing is complete.
-        """
         weapons_base_dir = os.path.join(output_base_dir, "weapon_detections")
         
         if not os.path.exists(weapons_base_dir):

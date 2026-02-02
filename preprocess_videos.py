@@ -27,148 +27,6 @@ RESOLUTIONS = {
 }
 
 class VideoPreprocessor:
-    @staticmethod
-    def process_one_worker(args):
-        video_file_str, raw_dir_str, samples_dir_str, clip_duration, frame_interval = args
-        from pathlib import Path
-        # Recreate VideoPreprocessor with minimal dirs (clips_dir unused)
-        preprocessor = VideoPreprocessor(raw_dir_str, "unused_clips_dir", samples_dir_str)
-        rel_subdir = Path(video_file_str).parent.relative_to(Path(raw_dir_str))
-        preprocessor.extract_samples_virtual_clips(video_file_str, clip_duration, frame_interval, rel_subdir)
-    def parse_srt_telemetry(self, srt_path):
-        """Parse SRT file and return a list of (start_sec, end_sec, telemetry_dict) for each subtitle entry."""
-        import re
-        entries = []
-        if not Path(srt_path).exists():
-            return entries
-        with open(srt_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        pattern = re.compile(r'(\d+)\s+([\d:,]+)\s+-->\s+([\d:,]+)\s+([\s\S]*?)(?=\n\d+\n|\Z)', re.MULTILINE)
-        for match in pattern.finditer(content):
-            idx, start, end, text = match.groups()
-            def srt_time_to_sec(t):
-                h, m, s_ms = t.split(':')
-                s, ms = s_ms.split(',')
-                return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
-            start_sec = srt_time_to_sec(start.strip())
-            end_sec = srt_time_to_sec(end.strip())
-            telemetry = self.parse_telemetry_text(text.strip())
-            entries.append((start_sec, end_sec, telemetry))
-        return entries
-
-    def parse_telemetry_text(self, text):
-        """Parse the telemetry text block into structured fields.
-        
-        Note: The SRT files use W/S labels, but based on the coordinate values,
-        they appear to represent latitude/longitude respectively.
-        We rename them to use standard geographic naming conventions.
-        """
-        import re
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        result = {}
-        for line in lines:
-            # HOME(W: 43.186691, S: 22.820683) 2026-01-30 11:31:11
-            # Note: W appears to be latitude, S appears to be longitude based on values
-            m = re.match(r'HOME\(W: ([\d.\-]+), S: ([\d.\-]+)\)\s+([\d\-]+ [\d:]+)', line)
-            if m:
-                result['home'] = {
-                    'latitude': float(m.group(1)), 
-                    'longitude': float(m.group(2))
-                }
-                result['datetime'] = m.group(3)
-                continue
-            # GPS(W: 43.186745, S: 22.820713, 21.31m)
-            m = re.match(r'GPS\(W: ([\d.\-]+), S: ([\d.\-]+), ([\d.\-]+)m\)', line)
-            if m:
-                result['gps'] = {
-                    'latitude': float(m.group(1)), 
-                    'longitude': float(m.group(2)), 
-                    'altitude_m': float(m.group(3))
-                }
-                continue
-            # ISO:100 SHUTTER:500 EV:0.0 F-NUM:1.8
-            m = re.match(r'ISO:(\d+) SHUTTER:([\d.]+) EV:([\d.\-]+) F-NUM:([\d.]+)', line)
-            if m:
-                result['iso'] = int(m.group(1))
-                result['shutter'] = float(m.group(2))
-                result['ev'] = float(m.group(3))
-                result['fnum'] = float(m.group(4))
-                continue
-            # F.PRY (0.7°, -1.1°, -145.5°), G.PRY (-10.0°, 0.0°, -148.2°)
-            m = re.match(r'F\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\), G\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\)', line)
-            if m:
-                result['fpry'] = {'pitch': float(m.group(1)), 'roll': float(m.group(2)), 'yaw': float(m.group(3))}
-                result['gpry'] = {'pitch': float(m.group(4)), 'roll': float(m.group(5)), 'yaw': float(m.group(6))}
-                continue
-            # If not matched, store as extra
-            if 'extra' not in result:
-                result['extra'] = []
-            result['extra'].append(line)
-        return result
-
-    def find_telemetry_for_time(self, srt_entries, t):
-        """Find the telemetry dict for a given time t (seconds)."""
-        for start, end, telemetry in srt_entries:
-            if start <= t < end:
-                return telemetry
-        return None
-    def extract_samples_virtual_clips(self, video_path: str, clip_duration: int, frame_interval: int, rel_subdir: Path = Path("")) -> None:
-        """Extract frames directly from video, organize into per-clip folders (virtual clips), skip errors and continue. Save telemetry from SRT if available."""
-        import json
-        video_name = Path(video_path).stem
-        cap = cv2.VideoCapture(video_path)
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        duration = frame_count / fps if fps > 0 else 0
-
-        # Try to find SRT file
-        srt_path = Path(video_path).with_suffix('.srt')
-        srt_entries = self.parse_srt_telemetry(srt_path) if srt_path.exists() else []
-
-        # Output directory for this video
-        output_samples_subdir = self.samples_dir / rel_subdir
-        output_samples_subdir.mkdir(parents=True, exist_ok=True)
-
-        print(f"  Extracting frames from {video_name} (clip duration: {clip_duration}s, frame interval: {frame_interval} frames)")
-
-        num_clips = int(duration // clip_duration)
-        total_samples = 0
-        for clip_idx in range(num_clips):
-            clip_start_sec = clip_idx * clip_duration
-            clip_end_sec = min((clip_idx + 1) * clip_duration, duration)
-            clip_folder = output_samples_subdir / f"{video_name}_clip_{clip_idx:03d}_{clip_duration}s"
-            clip_folder.mkdir(exist_ok=True)
-            sample_idx = 0
-            start_frame = int(clip_start_sec * fps)
-            end_frame = int(clip_end_sec * fps)
-            for frame_number in range(start_frame, end_frame, frame_interval):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-                try:
-                    ret, frame = cap.read()
-                    if not ret or frame is None:
-                        print(f"    [Warning] Could not read frame {frame_number} (t={frame_number/fps:.2f}s), skipping.")
-                        continue
-                    output_path = clip_folder / f"frame_{sample_idx:04d}.jpg"
-                    try:
-                        cv2.imwrite(str(output_path), frame)
-                        # Save telemetry JSON if SRT available
-                        if srt_entries:
-                            t_sec = frame_number / fps
-                            telemetry = self.find_telemetry_for_time(srt_entries, t_sec)
-                            if telemetry is not None:
-                                json_path = clip_folder / f"frame_{sample_idx:04d}.json"
-                                with open(json_path, 'w', encoding='utf-8') as jf:
-                                    json.dump(telemetry, jf, ensure_ascii=False, indent=2)
-                        sample_idx += 1
-                        total_samples += 1
-                    except Exception as e:
-                        print(f"    [Warning] Error saving frame {frame_number} (t={frame_number/fps:.2f}s): {e}. Skipping.")
-                except Exception as e:
-                    print(f"    [Warning] Error extracting frame {frame_number} (t={frame_number/fps:.2f}s): {e}. Skipping.")
-            print(f"    Extracted {sample_idx} frames to {clip_folder}")
-        cap.release()
-        print(f"    Total frames extracted for {video_name}: {total_samples}")
-        
     def __init__(self, raw_dir: str, clips_dir: str, samples_dir: str):
         self.raw_dir = Path(raw_dir)
         self.clips_dir = Path(clips_dir)
@@ -180,7 +38,7 @@ class VideoPreprocessor:
         
         # Compression presets
         self.compression_presets = {
-            'no_compression': {},
+            'none': {'crf': None, 'preset': None},  # No compression - copy codec
             'high_quality': {'crf': 18, 'preset': 'slow'},
             'balanced': {'crf': 23, 'preset': 'medium'},
             'compressed': {'crf': 28, 'preset': 'fast'},
@@ -206,37 +64,40 @@ class VideoPreprocessor:
         }
     
     def calculate_target_size(self, original_size: Tuple[int, int], target_resolution: str) -> Tuple[int, int]:
-        """Calculate target size maintaining aspect ratio. If 'no_compression', return original size."""
-        if target_resolution == 'no_compression':
-            return original_size
+        """Calculate target size maintaining aspect ratio."""
         if target_resolution not in RESOLUTIONS:
             raise ValueError(f"Unsupported resolution: {target_resolution}. Choose from {list(RESOLUTIONS.keys())}")
+        
         target_width, target_height = RESOLUTIONS[target_resolution]
         original_width, original_height = original_size
+        
         # Calculate scaling factor to fit within target resolution
         scale_w = target_width / original_width
         scale_h = target_height / original_height
         scale = min(scale_w, scale_h)
+        
         new_width = int(original_width * scale)
         new_height = int(original_height * scale)
+        
         # Ensure even dimensions for video encoding
         new_width = new_width - (new_width % 2)
         new_height = new_height - (new_height % 2)
+        
         return new_width, new_height
     
     def extract_video_clips(self, video_path: str, clip_duration: int, target_resolution: str, 
                            compression_preset: str = 'balanced', target_fps: float = None, 
-                           max_bitrate: str = None, rel_subdir: Path = Path("")) -> None:
-        """Extract video clips of specified duration with compression options, preserving subfolder structure. If 'no_compression', just copy segments without re-encoding or resizing."""
+                           max_bitrate: str = None, relative_path: str = None) -> None:
+        """Extract video clips of specified duration with compression options."""
         video_info = self.get_video_info(video_path)
         video_name = Path(video_path).stem
-
+        
         print(f"Processing {video_name}:")
         print(f"  Original: {video_info['width']}x{video_info['height']}, {video_info['duration']:.1f}s, {video_info['fps']:.1f} fps")
-
+        
         # Calculate target size
         target_size = self.calculate_target_size((video_info['width'], video_info['height']), target_resolution)
-
+        
         # Handle FPS reduction
         original_fps = video_info['fps']
         if target_fps and target_fps < original_fps:
@@ -246,89 +107,103 @@ class VideoPreprocessor:
         else:
             output_fps = original_fps
             fps_reduction = 1.0
-
-        if compression_preset == 'no_compression':
-            print(f"  Target: original resolution, no compression")
-        else:
-            print(f"  Target: {target_size[0]}x{target_size[1]}, {output_fps:.1f} fps")
-            print(f"  Compression: {compression_preset}")
-            if max_bitrate:
-                print(f"  Max bitrate: {max_bitrate}")
-            print(f"  Using NVIDIA GPU acceleration for ffmpeg (if available)")
-
+        
+        print(f"  Target: {target_size[0]}x{target_size[1]}, {output_fps:.1f} fps")
+        print(f"  Compression: {compression_preset}")
+        if max_bitrate:
+            print(f"  Max bitrate: {max_bitrate}")
+        
         # Calculate number of clips
         num_clips = int(video_info['duration'] // clip_duration)
         if num_clips == 0:
             print(f"  Warning: Video too short for {clip_duration}s clips")
             return
-
+        
         print(f"  Extracting {num_clips} clips of {clip_duration}s each")
-
-        # Use ffmpeg for better compression or just copy
+        
+        # Use ffmpeg for better compression
         import subprocess
-
-        # Ensure output subdirectory exists
-        output_clips_subdir = self.clips_dir / rel_subdir
-        output_clips_subdir.mkdir(parents=True, exist_ok=True)
-
+        
         for clip_idx in range(num_clips):
             start_time = clip_idx * clip_duration
-
+            
             # Create descriptive filename with compression and fps info
-            if compression_preset == 'no_compression':
-                filename = f"{video_name}_clip_{clip_idx:03d}_original.mp4"
+            fps_suffix = f"_{int(output_fps)}fps" if target_fps and target_fps < original_fps else ""
+            bitrate_suffix = f"_{max_bitrate}" if max_bitrate else ""
+            filename = f"{video_name}_clip_{clip_idx:03d}_{target_resolution}_{compression_preset}{fps_suffix}{bitrate_suffix}.mp4"
+            
+            # Maintain directory structure
+            if relative_path:
+                output_dir = self.clips_dir / relative_path
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / filename
             else:
-                fps_suffix = f"_{int(output_fps)}fps" if target_fps and target_fps < original_fps else ""
-                bitrate_suffix = f"_{max_bitrate}" if max_bitrate else ""
-                filename = f"{video_name}_clip_{clip_idx:03d}_{target_resolution}_{compression_preset}{fps_suffix}{bitrate_suffix}.mp4"
-            output_path = output_clips_subdir / filename
-
-            if compression_preset == 'no_compression':
-                # ffmpeg copy mode: no re-encoding, no scaling
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-ss', str(start_time),
-                    '-i', str(video_path),
-                    '-t', str(clip_duration),
-                    '-c', 'copy',
-                    str(output_path)
-                ]
-            else:
-                # Build ffmpeg command for better compression with NVIDIA GPU acceleration
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-hwaccel', 'cuda',
-                    '-ss', str(start_time),
-                    '-i', str(video_path),
-                    '-t', str(clip_duration),
-                    '-vf', f'scale_cuda={target_size[0]}:{target_size[1]}',
-                    '-c:v', 'h264_nvenc',
-                ]
-                # Add compression settings
-                preset_settings = self.compression_presets[compression_preset]
-                cmd.extend(['-rc:v', 'vbr', '-cq:v', str(preset_settings['crf'])])
-                cmd.extend(['-preset', preset_settings['preset']])
+                output_path = self.clips_dir / filename
+            
+            # Build ffmpeg command
+            cmd = [
+                'ffmpeg', '-y',  # -y to overwrite output files
+                '-ss', str(start_time),  # Start time
+                '-i', str(video_path),   # Input file
+                '-t', str(clip_duration),  # Duration
+            ]
+            
+            # Add compression settings
+            preset_settings = self.compression_presets[compression_preset]
+            
+            # Check if we need to re-encode (can't use copy with filters or fps change)
+            needs_reencode = (
+                preset_settings['crf'] is not None or  # Compression requested
+                target_fps and target_fps < original_fps or  # FPS change requested
+                target_size != (video_info['width'], video_info['height'])  # Resolution change
+            )
+            
+            if needs_reencode:
+                # Need to re-encode
+                cmd.extend(['-vf', f'scale={target_size[0]}:{target_size[1]}'])  # Scale
+                
+                if preset_settings['crf'] is not None:
+                    # Apply compression
+                    cmd.extend(['-c:v', 'libx264'])
+                    cmd.extend(['-crf', str(preset_settings['crf'])])
+                    cmd.extend(['-preset', preset_settings['preset']])
+                else:
+                    # No compression but still need to encode due to filters/fps
+                    cmd.extend(['-c:v', 'libx264'])
+                    cmd.extend(['-crf', '18'])  # High quality
+                    cmd.extend(['-preset', 'medium'])
+                
                 # Add FPS control
                 if target_fps and target_fps < original_fps:
                     cmd.extend(['-r', str(target_fps)])
+                
                 # Add bitrate limit if specified
                 if max_bitrate:
                     cmd.extend(['-maxrate', max_bitrate, '-bufsize', f"{int(max_bitrate.rstrip('kM')) * 2}k"])
-                # Audio settings (compress audio too)
+                
+                # Compress audio
                 cmd.extend(['-c:a', 'aac', '-b:a', '128k'])
-                # Output file
-                cmd.append(str(output_path))
-
+            else:
+                # Can use codec copy (no filters, no fps change, no resolution change)
+                cmd.extend(['-c:v', 'copy'])
+                cmd.extend(['-c:a', 'copy'])
+            
+            # Output file
+            cmd.append(str(output_path))
+            
             try:
                 # Run ffmpeg with suppressed output
                 result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+                
                 # Get file size
                 file_size_mb = output_path.stat().st_size / (1024 * 1024)
                 print(f"    Created: {output_path.name} ({file_size_mb:.1f}MB)")
+                
             except subprocess.CalledProcessError as e:
                 print(f"    Error creating {output_path.name}: {e}")
                 print(f"    Command: {' '.join(cmd)}")
-                print(f"    [Warning] GPU ffmpeg failed. Please check your NVIDIA drivers and ffmpeg build.")
+                # Fallback to OpenCV if ffmpeg fails
+                self._extract_clip_opencv_fallback(video_path, clip_idx, clip_duration, target_size, output_fps, output_path)
     
     def _extract_clip_opencv_fallback(self, video_path: str, clip_idx: int, clip_duration: int, 
                                     target_size: tuple, output_fps: float, output_path: Path):
@@ -362,93 +237,155 @@ class VideoPreprocessor:
         file_size_mb = output_path.stat().st_size / (1024 * 1024)
         print(f"    Created: {output_path.name} ({file_size_mb:.1f}MB) [OpenCV]")
     
-    def extract_frame_samples(self, clip_path: str, frame_interval: int, rel_subdir: Path = Path("")) -> None:
-        """Extract frame samples from video clips, preserving subfolder structure."""
+    def extract_frame_samples(self, clip_path: str, frame_interval: int, relative_path: str = None) -> None:
+        """Extract frame samples from video clips."""
         clip_name = Path(clip_path).stem
-
+        
         cap = cv2.VideoCapture(clip_path)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
+        
         # Create output directory for this clip (includes compression info in name)
-        output_samples_subdir = self.samples_dir / rel_subdir
-        output_samples_subdir.mkdir(parents=True, exist_ok=True)
-        output_dir = output_samples_subdir / f"{clip_name}_every{frame_interval}frames"
-        output_dir.mkdir(exist_ok=True)
-
+        # Maintain directory structure
+        sample_folder_name = f"{clip_name}_every{frame_interval}frames"
+        if relative_path:
+            output_dir = self.samples_dir / relative_path / sample_folder_name
+        else:
+            output_dir = self.samples_dir / sample_folder_name
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         frame_idx = 0
         sample_idx = 0
-
+        
         print(f"  Extracting frames from {clip_name} (every {frame_interval} frames)")
-
+        
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-
+            
             # Extract frame every W frames
             if frame_idx % frame_interval == 0:
                 output_path = output_dir / f"frame_{sample_idx:04d}.jpg"
                 cv2.imwrite(str(output_path), frame)
                 sample_idx += 1
-
+            
             frame_idx += 1
-
+        
         cap.release()
-        print(f"    Extracted {sample_idx} frames to {output_dir}")
+        print(f"    Extracted {sample_idx} frames to {output_dir.name}/")
     
-    def process_all_videos(self, clip_duration: int, frame_interval: int, num_workers: int = 4):
-        """Process all videos in parallel, extract frames into per-clip folders (virtual clips), skipping errors."""
-        import concurrent.futures
+    def process_clips_to_frames(self, frame_interval: int):
+        """Process existing clips directly to frame samples without raw videos."""
         print("=" * 70)
-        print("VIDEO FRAME EXTRACTION PIPELINE (VIRTUAL CLIPS)")
+        print("CLIPS TO FRAMES PIPELINE")
         print("=" * 70)
         print(f"Parameters:")
-        print(f"  Clip duration: {clip_duration} seconds")
-        print(f"  Frame interval: {frame_interval} frames")
-        print(f"  Parallel workers: {num_workers}")
+        print(f"  Frame interval (W): every {frame_interval} frames")
+        print(f"  Source: {self.clips_dir}")
+        print(f"  Output: {self.samples_dir}")
         print("=" * 70)
-
-        # Recursively get all video files (case-insensitive)
-        video_files = list(self.raw_dir.rglob("*.mp4")) + list(self.raw_dir.rglob("*.MP4"))
+        
+        # Get all clip files
+        clip_files = list(self.clips_dir.rglob("*.mp4")) + list(self.clips_dir.rglob("*.MP4"))
+        if not clip_files:
+            print(f"\nNo MP4 files found in {self.clips_dir}!")
+            return
+        
+        print(f"\nFound {len(clip_files)} clip files")
+        
+        # Extract frame samples
+        print("\nExtracting frame samples from clips...")
+        for clip_file in clip_files:
+            # Calculate relative path to maintain structure
+            relative_path = clip_file.relative_to(self.clips_dir).parent
+            self.extract_frame_samples(str(clip_file), frame_interval, str(relative_path))
+        
+        # Count sample directories
+        sample_dirs = [d for d in self.samples_dir.rglob("*") if d.is_dir()]
+        
+        print("\n" + "=" * 70)
+        print("PREPROCESSING COMPLETE!")
+        print(f"Results:")
+        print(f"  Processed clips: {len(clip_files)} files")
+        print(f"  Frame sample directories: {len(sample_dirs)}")
+        print(f"  Location: {self.samples_dir}")
+        print("=" * 70)
+    
+    def process_all_videos(self, clip_duration: int, target_resolution: str, frame_interval: int,
+                          compression_preset: str = 'balanced', target_fps: float = None, 
+                          max_bitrate: str = None):
+        """Process all videos in the raw_inputs directory."""
+        print("=" * 70)
+        print("VIDEO PREPROCESSING PIPELINE")
+        print("=" * 70)
+        print(f"Parameters:")
+        print(f"  Clip duration (X): {clip_duration} seconds")
+        print(f"  Target resolution (Z): {target_resolution}")
+        print(f"  Frame interval (W): every {frame_interval} frames")
+        print(f"  Compression preset: {compression_preset}")
+        if target_fps:
+            print(f"  Target FPS: {target_fps}")
+        if max_bitrate:
+            print(f"  Max bitrate: {max_bitrate}")
+        print("=" * 70)
+        
+        # Get all video files recursively
+        video_files = list(self.raw_dir.rglob("*.MP4")) + list(self.raw_dir.rglob("*.mp4"))
         if not video_files:
             print("No MP4 files found in raw directory!")
             return
-
+        
         print(f"\nFound {len(video_files)} video files")
-
-        print("\nSTEP: Extracting frame samples from videos into virtual clips (parallel)...")
-
-        # Prepare arguments for each worker
-        args_list = [
-            (str(video_file), str(self.raw_dir), str(self.samples_dir), clip_duration, frame_interval)
-            for video_file in video_files
-        ]
-
-        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
-            list(executor.map(VideoPreprocessor.process_one_worker, args_list))
-
+        
+        # Step 1: Extract clips
+        print("\nSTEP 1: Extracting video clips...")
+        total_size_mb = 0
+        for video_file in video_files:
+            # Calculate relative path to maintain structure
+            relative_path = video_file.relative_to(self.raw_dir).parent
+            self.extract_video_clips(str(video_file), clip_duration, target_resolution, 
+                                   compression_preset, target_fps, max_bitrate, str(relative_path))
+        
+        # Calculate total size of clips
+        clip_files = list(self.clips_dir.rglob("*.mp4"))
+        for clip_file in clip_files:
+            total_size_mb += clip_file.stat().st_size / (1024 * 1024)
+        
+        # Step 2: Extract frame samples
+        print("\nSTEP 2: Extracting frame samples...")
+        for clip_file in clip_files:
+            # Calculate relative path to maintain structure
+            relative_path = clip_file.relative_to(self.clips_dir).parent
+            self.extract_frame_samples(str(clip_file), frame_interval, str(relative_path))
+        
         print("\n" + "=" * 70)
-        print("FRAME EXTRACTION COMPLETE!")
-        print(f"  Frame samples: {len(list(self.samples_dir.rglob('*_clip_*')))} directories")
-        print(f"  Location: {self.samples_dir}")
+        print("PREPROCESSING COMPLETE!")
+        print(f"Results:")
+        print(f"  Video clips: {len(clip_files)} files ({total_size_mb:.1f}MB total)")
+        print(f"  Frame samples: {len(list(self.samples_dir.iterdir()))} directories")
+        print(f"  Location: {self.clips_dir} and {self.samples_dir}")
         print("=" * 70)
 
 def main():
     parser = argparse.ArgumentParser(description="Video preprocessing pipeline for person detection")
+    
+    # Mode selection
+    parser.add_argument("--clips-only", action="store_true",
+                       help="Process existing clips to frames only, skip raw video processing")
+    
     parser.add_argument("-X", "--clip-duration", type=int, default=10,
                        help="Clip duration in seconds (default: 10)")
     parser.add_argument("-Z", "--resolution", type=str, default="1080p", 
                        choices=list(RESOLUTIONS.keys()),
                        help="Target resolution (default: 1080p)")
-    parser.add_argument("-W", "--frame-interval", type=int, default=60,
-                       help="Frame sampling interval - extract 1 frame every W frames (default: 60)")
+    parser.add_argument("-W", "--frame-interval", type=int, default=10,
+                       help="Frame sampling interval - extract 1 frame every W frames (default: 10)")
 
     # Compression parameters
-    parser.add_argument("-C", "--compression", type=str, default="balanced",
-                       choices=['high_quality', 'balanced', 'compressed', 'very_compressed'],
-                       help="Compression preset: high_quality, balanced, compressed, very_compressed (default: balanced)")
-    parser.add_argument("--no-compression", action="store_true", help="If set, disables compression and resizing, keeping original video quality and resolution.")
-    parser.add_argument("-F", "--fps", type=float, default=None,
+    parser.add_argument("-C", "--compression", type=str, default="none",
+                       choices=['none', 'high_quality', 'balanced', 'compressed', 'very_compressed'],
+                       help="Compression preset: none (no compression), high_quality, balanced, compressed, very_compressed (default: balanced)")
+    parser.add_argument("-F", "--fps", type=int, default=10,
                        help="Target FPS (reduces from original if lower, saves space)")
     parser.add_argument("-B", "--max-bitrate", type=str, default=None,
                        help="Maximum bitrate (e.g., '2M', '1000k') - limits file size")
@@ -463,26 +400,22 @@ def main():
     
     args = parser.parse_args()
     
-    # If no-compression flag is set, override related args
-    if args.no_compression:
-        args.compression = 'no_compression'
-        args.resolution = 'no_compression'
-        args.fps = None
-        args.max_bitrate = None
-
     # Validate bitrate format if provided
     if args.max_bitrate and not (args.max_bitrate.endswith('k') or args.max_bitrate.endswith('M')):
         print("Error: Bitrate must end with 'k' or 'M' (e.g., '1000k', '2M')")
         return
-
-    # Create preprocessor (clips_dir is not used, but kept for compatibility)
-    preprocessor = VideoPreprocessor(args.raw, "unused_clips_dir", args.samples)
-
-    # Number of parallel workers (default: 4, or set via env var or argument if desired)
-    num_workers = 4
-
-    # Process all videos (extract frames into virtual clips) in parallel
-    preprocessor.process_all_videos(args.clip_duration, args.frame_interval, num_workers=num_workers)
+    
+    # Create preprocessor
+    preprocessor = VideoPreprocessor(args.raw, args.clips, args.samples)
+    
+    # Choose processing mode
+    if args.clips_only:
+        # Process existing clips to frames only
+        preprocessor.process_clips_to_frames(args.frame_interval)
+    else:
+        # Process all videos (clips + frames)
+        preprocessor.process_all_videos(args.clip_duration, args.resolution, args.frame_interval,
+                                      args.compression, args.fps, args.max_bitrate)
 
 if __name__ == "__main__":
     main()

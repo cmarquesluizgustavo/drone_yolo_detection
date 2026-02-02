@@ -2,13 +2,6 @@ class DetectionStatistics:
     """Class to track comprehensive detection statistics."""
     
     def __init__(self, sample_majority_threshold=1):
-        """
-        Initialize statistics tracker.
-        
-        Args:
-            sample_majority_threshold: Number of frames with weapon detections 
-                                      needed to classify a sample as having weapons
-        """
         self.sample_majority_threshold = sample_majority_threshold
         self.reset()
     
@@ -136,10 +129,8 @@ class DetectionStatistics:
             self.sample_metrics_by_class[self.current_sample_class][metric_result] += 1
     
     def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth,
-                          distances=None, distance_pairs=None, real_distance=None, camera_height=None,
+                          distances=None, real_distance=None, cam_height_m=None,
                           sample_class=None,
-                          camera_pitch_annotated_deg=None,
-                          camera_pitch_real_deg=None,
                           distance_pairs_pinhole=None,
                           distance_pairs_pitch=None):
         """Add results from processing one image."""
@@ -182,12 +173,12 @@ class DetectionStatistics:
             if real_distance not in self.metrics_by_distance:
                 self.metrics_by_distance[real_distance] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
             self.metrics_by_distance[real_distance][metric_result] += 1
-        
-        if camera_height is not None:
-            if camera_height not in self.metrics_by_height:
-                self.metrics_by_height[camera_height] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
-            self.metrics_by_height[camera_height][metric_result] += 1
-        
+
+        if cam_height_m is not None:
+            if cam_height_m not in self.metrics_by_height:
+                self.metrics_by_height[cam_height_m] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
+            self.metrics_by_height[cam_height_m][metric_result] += 1
+
         if sample_class is not None:
             if sample_class not in self.metrics_by_class:
                 self.metrics_by_class[sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
@@ -204,37 +195,11 @@ class DetectionStatistics:
             self.distances.extend(distances)
             self.people_with_distance += len(distances)
         # Add (estimated, real) pairs for RMSE
-        if distance_pairs:
-            self.distance_pairs.extend(distance_pairs)
-            # Also track by camera height for RMSE
-            if camera_height is not None:
-                if camera_height not in self.distance_pairs_by_height:
-                    self.distance_pairs_by_height[camera_height] = []
-                self.distance_pairs_by_height[camera_height].extend(distance_pairs)
-            # Track by (class, distance, height) combination
-            if sample_class is not None and real_distance is not None and camera_height is not None:
-                combination_key = (sample_class, real_distance, camera_height)
-                if combination_key not in self.distance_pairs_by_combination:
-                    self.distance_pairs_by_combination[combination_key] = []
-                self.distance_pairs_by_combination[combination_key].extend(distance_pairs)
             # Track by (distance, height) for aggregation across classes
-            if real_distance is not None and camera_height is not None:
-                dist_height_key = (real_distance, camera_height)
+            if real_distance is not None and cam_height_m is not None:
+                dist_height_key = (real_distance, cam_height_m)
                 if dist_height_key not in self.distance_pairs_by_dist_height:
                     self.distance_pairs_by_dist_height[dist_height_key] = []
-                self.distance_pairs_by_dist_height[dist_height_key].extend(distance_pairs)
-            # Track by (class, distance, height, camera pitch) combination
-            if sample_class is not None and real_distance is not None and camera_height is not None and camera_pitch_annotated_deg is not None:
-                combination_key_pitch = (sample_class, real_distance, camera_height, camera_pitch_annotated_deg)
-                if combination_key_pitch not in self.distance_pairs_by_combination_with_pitch:
-                    self.distance_pairs_by_combination_with_pitch[combination_key_pitch] = []
-                self.distance_pairs_by_combination_with_pitch[combination_key_pitch].extend(distance_pairs)
-            # Track by (distance, height, camera pitch) for aggregation across classes
-            if real_distance is not None and camera_height is not None and camera_pitch_annotated_deg is not None:
-                dist_height_pitch_key = (real_distance, camera_height, camera_pitch_annotated_deg)
-                if dist_height_pitch_key not in self.distance_pairs_by_dist_height_pitch:
-                    self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key] = []
-                self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key].extend(distance_pairs)
 
         # Store method-specific pairs (overall only; use these to compare methods).
         if distance_pairs_pinhole:
@@ -242,19 +207,20 @@ class DetectionStatistics:
         if distance_pairs_pitch:
             self.distance_pairs_pitch.extend(distance_pairs_pitch)
 
-        # Store method-specific pairs by (class, distance, height, camera pitch) when possible.
-        if sample_class is not None and real_distance is not None and camera_height is not None and camera_pitch_annotated_deg is not None:
-            combo_key = (sample_class, real_distance, camera_height, camera_pitch_annotated_deg)
+        # Store method-specific pairs by (class, distance, height) when possible.
+        if sample_class is not None and real_distance is not None and cam_height_m is not None:
+            combo_key = (sample_class, real_distance, cam_height_m)
 
             if distance_pairs_pinhole:
-                if combo_key not in self.distance_pairs_pinhole_by_combo_pitch:
-                    self.distance_pairs_pinhole_by_combo_pitch[combo_key] = []
-                self.distance_pairs_pinhole_by_combo_pitch[combo_key].extend(distance_pairs_pinhole)
+                if combo_key not in self.distance_pairs_pinhole_by_combo:
+                    self.distance_pairs_pinhole_by_combo[combo_key] = []
+                self.distance_pairs_pinhole_by_combo[combo_key].extend(distance_pairs_pinhole)
 
             if distance_pairs_pitch:
-                if combo_key not in self.distance_pairs_pitch_by_combo_pitch:
-                    self.distance_pairs_pitch_by_combo_pitch[combo_key] = []
-                self.distance_pairs_pitch_by_combo_pitch[combo_key].extend(distance_pairs_pitch)
+                if combo_key not in self.distance_pairs_pitch_by_combo:
+                    self.distance_pairs_pitch_by_combo[combo_key] = []
+                self.distance_pairs_pitch_by_combo[combo_key].extend(distance_pairs_pitch)
+
     def compute_rmse(self, distance_pairs=None):
         """Compute RMSE for distance estimation (only where real distance is available)."""
         pairs = distance_pairs if distance_pairs is not None else self.distance_pairs
