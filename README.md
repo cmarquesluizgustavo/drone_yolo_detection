@@ -65,7 +65,7 @@ docker run -v $(pwd):/workspace people-detector
 python src/main.py --input inputs/samples --output output/batch_results
 
 # Custom confidence thresholds
-python src/main.py --confidence 0.6 --weapon-confidence 0.3
+python src/main.py --person-confidence 0.6 --weapon-confidence 0.3
 
 # Adjust majority voting (require 3+ frames with weapons to classify sample)
 python src/main.py --sample-majority-threshold 3
@@ -77,7 +77,7 @@ python src/main.py --no-weapons
 python src/main.py --model models/people/yolo11n.pt \
                    --input inputs/samples \
                    --output output/detections \
-                   --confidence 0.6 \
+                   --person-confidence 0.6 \
                    --weapon-confidence 0.25 \
                    --sample-majority-threshold 2 \
                    --save-crops
@@ -91,7 +91,7 @@ python src/main.py --model models/people/yolo11n.pt \
 - `--input_with_weapons`: Input directory with weapon samples (optional)
 - `--input_without_weapons`: Input directory without weapon samples (optional)
 - `--output`: Output directory (default: `output/detections`)
-- `--confidence`: Person detection threshold, 0.0-1.0 (default: 0.5)
+- `--person-confidence`: Person detection threshold, 0.0-1.0 (default: 0.7)
 - `--weapon-confidence`: Weapon detection threshold, 0.0-1.0 (default: 0.2)
 - `--sample-majority-threshold`: Frames with weapons needed to classify sample (default: 1)
 - `--save-crops`: Save person crops (default: enabled)

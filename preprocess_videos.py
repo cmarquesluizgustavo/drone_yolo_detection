@@ -27,13 +27,90 @@ RESOLUTIONS = {
 }
 
 class VideoPreprocessor:
+    @staticmethod
+    def process_one_worker(args):
+        video_file_str, raw_dir_str, samples_dir_str, clip_duration, frame_interval = args
+        from pathlib import Path
+        # Recreate VideoPreprocessor with minimal dirs (clips_dir unused)
+        preprocessor = VideoPreprocessor(raw_dir_str, "unused_clips_dir", samples_dir_str)
+        rel_subdir = Path(video_file_str).parent.relative_to(Path(raw_dir_str))
+        preprocessor.extract_samples_virtual_clips(video_file_str, clip_duration, frame_interval, rel_subdir)
+    def parse_srt_telemetry(self, srt_path):
+        """Parse SRT file and return a list of (start_sec, end_sec, telemetry_dict) for each subtitle entry."""
+        import re
+        entries = []
+        if not Path(srt_path).exists():
+            return entries
+        with open(srt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        pattern = re.compile(r'(\d+)\s+([\d:,]+)\s+-->\s+([\d:,]+)\s+([\s\S]*?)(?=\n\d+\n|\Z)', re.MULTILINE)
+        for match in pattern.finditer(content):
+            idx, start, end, text = match.groups()
+            def srt_time_to_sec(t):
+                h, m, s_ms = t.split(':')
+                s, ms = s_ms.split(',')
+                return int(h)*3600 + int(m)*60 + int(s) + int(ms)/1000
+            start_sec = srt_time_to_sec(start.strip())
+            end_sec = srt_time_to_sec(end.strip())
+            telemetry = self.parse_telemetry_text(text.strip())
+            entries.append((start_sec, end_sec, telemetry))
+        return entries
+
+    def parse_telemetry_text(self, text):
+        """Parse the telemetry text block into structured fields."""
+        import re
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        result = {}
+        for line in lines:
+            # HOME(W: 43.186691, S: 22.820683) 2026-01-30 11:31:11
+            m = re.match(r'HOME\(W: ([\d.\-]+), S: ([\d.\-]+)\)\s+([\d\-]+ [\d:]+)', line)
+            if m:
+                result['home'] = {'W': float(m.group(1)), 'S': float(m.group(2))}
+                result['datetime'] = m.group(3)
+                continue
+            # GPS(W: 43.186745, S: 22.820713, 21.31m)
+            m = re.match(r'GPS\(W: ([\d.\-]+), S: ([\d.\-]+), ([\d.\-]+)m\)', line)
+            if m:
+                result['gps'] = {'W': float(m.group(1)), 'S': float(m.group(2)), 'height_m': float(m.group(3))}
+                continue
+            # ISO:100 SHUTTER:500 EV:0.0 F-NUM:1.8
+            m = re.match(r'ISO:(\d+) SHUTTER:([\d.]+) EV:([\d.\-]+) F-NUM:([\d.]+)', line)
+            if m:
+                result['iso'] = int(m.group(1))
+                result['shutter'] = float(m.group(2))
+                result['ev'] = float(m.group(3))
+                result['fnum'] = float(m.group(4))
+                continue
+            # F.PRY (0.7°, -1.1°, -145.5°), G.PRY (-10.0°, 0.0°, -148.2°)
+            m = re.match(r'F\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\), G\.PRY \(([-\d.]+)°?, ([-\d.]+)°?, ([-\d.]+)°?\)', line)
+            if m:
+                result['fpry'] = {'roll': float(m.group(1)), 'pitch': float(m.group(2)), 'yaw': float(m.group(3))}
+                result['gpry'] = {'roll': float(m.group(4)), 'pitch': float(m.group(5)), 'yaw': float(m.group(6))}
+                continue
+            # If not matched, store as extra
+            if 'extra' not in result:
+                result['extra'] = []
+            result['extra'].append(line)
+        return result
+
+    def find_telemetry_for_time(self, srt_entries, t):
+        """Find the telemetry dict for a given time t (seconds)."""
+        for start, end, telemetry in srt_entries:
+            if start <= t < end:
+                return telemetry
+        return None
     def extract_samples_virtual_clips(self, video_path: str, clip_duration: int, frame_interval: int, rel_subdir: Path = Path("")) -> None:
-        """Extract frames directly from video, organize into per-clip folders (virtual clips), skip errors and continue."""
+        """Extract frames directly from video, organize into per-clip folders (virtual clips), skip errors and continue. Save telemetry from SRT if available."""
+        import json
         video_name = Path(video_path).stem
         cap = cv2.VideoCapture(video_path)
         fps = cap.get(cv2.CAP_PROP_FPS)
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         duration = frame_count / fps if fps > 0 else 0
+
+        # Try to find SRT file
+        srt_path = Path(video_path).with_suffix('.srt')
+        srt_entries = self.parse_srt_telemetry(srt_path) if srt_path.exists() else []
 
         # Output directory for this video
         output_samples_subdir = self.samples_dir / rel_subdir
@@ -61,6 +138,14 @@ class VideoPreprocessor:
                     output_path = clip_folder / f"frame_{sample_idx:04d}.jpg"
                     try:
                         cv2.imwrite(str(output_path), frame)
+                        # Save telemetry JSON if SRT available
+                        if srt_entries:
+                            t_sec = frame_number / fps
+                            telemetry = self.find_telemetry_for_time(srt_entries, t_sec)
+                            if telemetry is not None:
+                                json_path = clip_folder / f"frame_{sample_idx:04d}.json"
+                                with open(json_path, 'w', encoding='utf-8') as jf:
+                                    json.dump(telemetry, jf, ensure_ascii=False, indent=2)
                         sample_idx += 1
                         total_samples += 1
                     except Exception as e:
@@ -156,6 +241,7 @@ class VideoPreprocessor:
             print(f"  Compression: {compression_preset}")
             if max_bitrate:
                 print(f"  Max bitrate: {max_bitrate}")
+            print(f"  Using NVIDIA GPU acceleration for ffmpeg (if available)")
 
         # Calculate number of clips
         num_clips = int(video_info['duration'] // clip_duration)
@@ -195,18 +281,19 @@ class VideoPreprocessor:
                     str(output_path)
                 ]
             else:
-                # Build ffmpeg command for better compression
+                # Build ffmpeg command for better compression with NVIDIA GPU acceleration
                 cmd = [
-                    'ffmpeg', '-y',  # -y to overwrite output files
-                    '-ss', str(start_time),  # Start time
-                    '-i', str(video_path),   # Input file
-                    '-t', str(clip_duration),  # Duration
-                    '-vf', f'scale={target_size[0]}:{target_size[1]}',  # Scale
-                    '-c:v', 'libx264',  # Use H.264 codec
+                    'ffmpeg', '-y',
+                    '-hwaccel', 'cuda',
+                    '-ss', str(start_time),
+                    '-i', str(video_path),
+                    '-t', str(clip_duration),
+                    '-vf', f'scale_cuda={target_size[0]}:{target_size[1]}',
+                    '-c:v', 'h264_nvenc',
                 ]
                 # Add compression settings
                 preset_settings = self.compression_presets[compression_preset]
-                cmd.extend(['-crf', str(preset_settings['crf'])])
+                cmd.extend(['-rc:v', 'vbr', '-cq:v', str(preset_settings['crf'])])
                 cmd.extend(['-preset', preset_settings['preset']])
                 # Add FPS control
                 if target_fps and target_fps < original_fps:
@@ -228,8 +315,7 @@ class VideoPreprocessor:
             except subprocess.CalledProcessError as e:
                 print(f"    Error creating {output_path.name}: {e}")
                 print(f"    Command: {' '.join(cmd)}")
-                # Fallback to OpenCV if ffmpeg fails
-                self._extract_clip_opencv_fallback(video_path, clip_idx, clip_duration, target_size, output_fps, output_path)
+                print(f"    [Warning] GPU ffmpeg failed. Please check your NVIDIA drivers and ffmpeg build.")
     
     def _extract_clip_opencv_fallback(self, video_path: str, clip_idx: int, clip_duration: int, 
                                     target_size: tuple, output_fps: float, output_path: Path):
@@ -297,14 +383,16 @@ class VideoPreprocessor:
         cap.release()
         print(f"    Extracted {sample_idx} frames to {output_dir}")
     
-    def process_all_videos(self, clip_duration: int, frame_interval: int):
-        """Process all videos, extract frames into per-clip folders (virtual clips), skipping errors."""
+    def process_all_videos(self, clip_duration: int, frame_interval: int, num_workers: int = 4):
+        """Process all videos in parallel, extract frames into per-clip folders (virtual clips), skipping errors."""
+        import concurrent.futures
         print("=" * 70)
         print("VIDEO FRAME EXTRACTION PIPELINE (VIRTUAL CLIPS)")
         print("=" * 70)
         print(f"Parameters:")
         print(f"  Clip duration: {clip_duration} seconds")
         print(f"  Frame interval: {frame_interval} frames")
+        print(f"  Parallel workers: {num_workers}")
         print("=" * 70)
 
         # Recursively get all video files
@@ -315,10 +403,16 @@ class VideoPreprocessor:
 
         print(f"\nFound {len(video_files)} video files")
 
-        print("\nSTEP: Extracting frame samples from videos into virtual clips...")
-        for video_file in video_files:
-            rel_subdir = video_file.parent.relative_to(self.raw_dir)
-            self.extract_samples_virtual_clips(str(video_file), clip_duration, frame_interval, rel_subdir)
+        print("\nSTEP: Extracting frame samples from videos into virtual clips (parallel)...")
+
+        # Prepare arguments for each worker
+        args_list = [
+            (str(video_file), str(self.raw_dir), str(self.samples_dir), clip_duration, frame_interval)
+            for video_file in video_files
+        ]
+
+        with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
+            list(executor.map(VideoPreprocessor.process_one_worker, args_list))
 
         print("\n" + "=" * 70)
         print("FRAME EXTRACTION COMPLETE!")
@@ -371,8 +465,11 @@ def main():
     # Create preprocessor (clips_dir is not used, but kept for compatibility)
     preprocessor = VideoPreprocessor(args.raw, "unused_clips_dir", args.samples)
 
-    # Process all videos (extract frames into virtual clips)
-    preprocessor.process_all_videos(args.clip_duration, args.frame_interval)
+    # Number of parallel workers (default: 4, or set via env var or argument if desired)
+    num_workers = 4
+
+    # Process all videos (extract frames into virtual clips) in parallel
+    preprocessor.process_all_videos(args.clip_duration, args.frame_interval, num_workers=num_workers)
 
 if __name__ == "__main__":
     main()

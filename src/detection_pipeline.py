@@ -20,7 +20,7 @@ except ImportError:
 class DetectionPipeline:
     """Pipeline for batch processing images with people and weapon detection."""
     
-    def __init__(self, model_path: str, confidence_threshold: float = 0.4, 
+    def __init__(self, model_path: str, person_confidence_threshold: float = 0.4, 
                  enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.2, 
                  sample_majority_threshold: int = 1):
         """
@@ -28,7 +28,7 @@ class DetectionPipeline:
         
         Args:
             model_path: Path to the YOLO model file
-            confidence_threshold: Minimum confidence for detections
+            person_confidence_threshold: Minimum confidence for person detections
             enable_weapon_detection: Whether to enable weapon detection on person crops
             weapon_confidence_threshold: Minimum confidence for weapon detections
             sample_majority_threshold: Number of frames with weapons needed to classify sample as having weapons
@@ -36,7 +36,7 @@ class DetectionPipeline:
         # Initialize the core detector
         self.detector = PeopleDetector(
             model_path=model_path,
-            confidence_threshold=confidence_threshold,
+            person_confidence_threshold=person_confidence_threshold,
             enable_weapon_detection=enable_weapon_detection,
             weapon_confidence_threshold=weapon_confidence_threshold
         )
@@ -49,21 +49,11 @@ class DetectionPipeline:
         self.enable_weapon_detection = enable_weapon_detection
     
     def extract_person_crops(self, image, detections_info):
-        """
-        Extract person crops from the original image based on detections.
-        
-        Args:
-            image: Original image (numpy array)
-            detections_info: List of detection dictionaries
-            
-        Returns:
-            list: List of tuples (crop_image, crop_info)
-        """
         crops = []
         
         for i, detection in enumerate(detections_info):
             x1, y1, x2, y2 = detection['bbox']
-            confidence = detection['confidence']
+            person_confidence = detection.get('person_confidence', detection.get('confidence'))
             
             # Add padding to the bounding box
             try:
@@ -94,7 +84,9 @@ class DetectionPipeline:
                 'person_id': i + 1,
                 'bbox': detection['bbox'],
                 'padded_bbox': [x1_pad, y1_pad, x2_pad, y2_pad],
-                'confidence': confidence,
+                # Keep both keys for backward/forward compatibility across pipelines.
+                'confidence': person_confidence,
+                'person_confidence': person_confidence,
                 'crop_size': (crop_width, crop_height)
             }
             crops.append((cropped_person, crop_info))
@@ -102,32 +94,12 @@ class DetectionPipeline:
         return crops
     
     def detect_weapons_in_crops(self, crops_with_info):
-        """
-        Detect weapons in person crops using the weapon detector.
-        
-        Args:
-            crops_with_info: List of tuples (crop_image, crop_info)
-            
-        Returns:
-            list: List of weapon detection results
-        """
         if not self.enable_weapon_detection or not self.detector.weapon_detector:
             return []
         
         return self.detector.weapon_detector.process_multiple_crops(crops_with_info)
     
     def draw_boxes_on_image(self, image, detections_info, weapon_results=None):
-        """
-        Draw person bounding boxes (GREEN) and weapon boxes (RED) on the image.
-        
-        Args:
-            image: Original image (numpy array)
-            detections_info: List of person detection dictionaries
-            weapon_results: Optional list of weapon detection results
-            
-        Returns:
-            image: Image with all boxes drawn
-        """
         result_image = image.copy()
         
         try:
@@ -144,8 +116,10 @@ class DetectionPipeline:
         # Draw person boxes in GREEN
         for detection in detections_info:
             x1, y1, x2, y2 = detection['bbox']
-            confidence = detection['confidence']
+            person_confidence = detection.get('person_confidence', detection.get('confidence'))
             distance_m = detection.get('distance_m', None)
+            dist_p = detection.get('distance_pinhole_m', None)
+            dist_t = detection.get('distance_pitch_m', None)
             
             person_box_color = (0, 255, 0)  # Green for person
             cv2.rectangle(result_image, 
@@ -154,8 +128,14 @@ class DetectionPipeline:
                         person_box_color, box_thickness)
             
             # Add confidence label
-            label = f"Person: {confidence:.2f}"
-            if distance_m is not None:
+            label = f"Person: {person_confidence:.2f}"
+            # Show both distance estimates when available for easy comparison.
+            if dist_p is not None or dist_t is not None:
+                if dist_p is not None:
+                    label += f" P:{dist_p:.1f}m"
+                if dist_t is not None:
+                    label += f" Pitch:{dist_t:.1f}m"
+            elif distance_m is not None:
                 label += f" ({distance_m:.1f}m)"
             
             cv2.putText(result_image, label, 
@@ -170,16 +150,6 @@ class DetectionPipeline:
         return result_image
     
     def _draw_weapon_boxes(self, image, weapon_results):
-        """
-        Draw weapon bounding boxes in RED on the full image.
-        
-        Args:
-            image: Full image (numpy array)
-            weapon_results: List of weapon detection results
-            
-        Returns:
-            image: Image with weapon boxes drawn
-        """
         try:
             box_thickness = BOX_THICKNESS
             font_scale = FONT_SCALE
@@ -224,20 +194,11 @@ class DetectionPipeline:
         return image
     
     def save_bounding_box_crops(self, image, detections_info, crops_dir, base_filename):
-        """
-        Save individual cropped images for each detected person.
-        
-        Args:
-            image: Original image (numpy array)
-            detections_info: List of detection dictionaries
-            crops_dir: Directory to save crops (already created)
-            base_filename: Base filename (without extension)
-        """
         saved_crops = 0
         
         for i, detection in enumerate(detections_info):
             x1, y1, x2, y2 = detection['bbox']
-            confidence = detection['confidence']
+            confidence = detection.get('confidence', detection.get('person_confidence'))
             
             # Add padding to the bounding box
             try:
@@ -282,17 +243,6 @@ class DetectionPipeline:
         return saved_crops
     
     def save_weapon_detection_results(self, weapon_results, output_dir, base_filename):
-        """
-        Save weapon detection results - only weapon bounding box crops.
-        
-        Args:
-            weapon_results: List of weapon detection results
-            output_dir: Output directory
-            base_filename: Base filename for saving
-            
-        Returns:
-            tuple: (Number of weapon detections saved, number of people with weapons)
-        """
         if not weapon_results:
             return 0, 0
         
@@ -305,7 +255,7 @@ class DetectionPipeline:
         
         for result in weapon_results:
             person_id = result['person_info']['person_id']
-            person_confidence = result['person_info']['confidence']
+            person_confidence = result['person_info'].get('confidence', result['person_info'].get('person_confidence'))
             
             if result['has_weapons'] and result['weapon_crops']:
                 people_with_weapons += 1
@@ -327,14 +277,6 @@ class DetectionPipeline:
         return weapons_detected, people_with_weapons
     
     def process_directory(self, input_dir: str, output_dir: str, with_weapons=False):
-        """
-        Process all images in a directory and save results.
-        
-        Args:
-            input_dir: Directory containing input images
-            output_dir: Directory to save processed images
-            with_weapons: Legacy parameter, now determined from directory name
-        """
         # Create organized output directories
         detections_dir = os.path.join(output_dir, "detections")
         crops_dir = os.path.join(output_dir, "crops")
@@ -343,9 +285,18 @@ class DetectionPipeline:
         if self.save_crops:
             Path(crops_dir).mkdir(parents=True, exist_ok=True)
         
-        # Determine ground truth from directory name
+        # Determine ground truth from filename convention when possible.
         dir_name = os.path.basename(input_dir)
-        has_weapons_ground_truth = dir_name.lower().startswith("real")
+        dir_meta = {}
+        try:
+            dir_meta = self.detector.extract_filename_metadata(input_dir)
+        except Exception:
+            dir_meta = {}
+        sample_class_dir = (dir_meta or {}).get('sample_class')
+        if sample_class_dir in ('real', 'falso'):
+            has_weapons_ground_truth = (sample_class_dir == 'real')
+        else:
+            has_weapons_ground_truth = dir_name.lower().startswith("real")
         
         # Get all image files
         image_files = []
@@ -370,6 +321,22 @@ class DetectionPipeline:
                 
                 # Use detector to detect people
                 _, detections = self.detector.detect_people(image_path, draw_boxes=False)
+
+                # Extract testing-time condition metadata from filenames (used for RMSE comparisons).
+                file_meta = self.detector.extract_filename_metadata(image_path)
+                real_distance = file_meta.get('distance_m')
+                camera_height_annotated = file_meta.get('height_m')
+                camera_pitch_annotated_deg = file_meta.get('camera_pitch_deg')
+                sample_class = file_meta.get('sample_class') or ('real' if dir_name.lower().startswith('real') else 'falso')
+
+                # Use real camera pitch from drone metadata (JSON) when available.
+                camera_pitch_real_deg = None
+                if getattr(self.detector, 'camera', None) is not None:
+                    try:
+                        if self.detector.camera.load_from_json(image_path):
+                            camera_pitch_real_deg = self.detector.camera.pitch_deg
+                    except Exception:
+                        camera_pitch_real_deg = None
                 
                 # Extract person crops for weapon detection
                 person_crops = []
@@ -402,17 +369,27 @@ class DetectionPipeline:
                 
                 # Extract distances and (estimated, real) pairs from detections
                 distances = [d['distance_m'] for d in detections if 'distance_m' in d]
-                real_distance = self.detector.extract_real_distance_from_filename(image_path)
-                camera_height = self.detector.extract_camera_height_from_filename(image_path)
-                camera_tilt = self.detector.extract_camera_tilt_from_filename(image_path)
-                sample_class = 'real' if dir_name.lower().startswith('real') else 'falso'
                 distance_pairs = []
+                distance_pairs_pinhole = []
+                distance_pairs_pitch = []
                 if real_distance is not None:
                     for d in detections:
                         if 'distance_m' in d:
                             distance_pairs.append((d['distance_m'], real_distance))
+                        if 'distance_pinhole_m' in d:
+                            distance_pairs_pinhole.append((d['distance_pinhole_m'], real_distance))
+                        if 'distance_pitch_m' in d:
+                            distance_pairs_pitch.append((d['distance_pitch_m'], real_distance))
                 # Update statistics with ground truth from directory name
-                self.stats.add_image_results(len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth, distances, distance_pairs, real_distance, camera_height, sample_class, camera_tilt)
+                self.stats.add_image_results(
+                    len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth,
+                    distances, distance_pairs, real_distance, camera_height_annotated,
+                    sample_class=sample_class,
+                    camera_pitch_annotated_deg=camera_pitch_annotated_deg,
+                    camera_pitch_real_deg=camera_pitch_real_deg,
+                    distance_pairs_pinhole=distance_pairs_pinhole,
+                    distance_pairs_pitch=distance_pairs_pitch,
+                )
                 
                 # Print detection summary
                 if detections:
@@ -448,14 +425,6 @@ class DetectionPipeline:
                 print(f"Distance measurements: {stats['total_distances']}")
     
     def process_all_sample_directories(self, samples_dir: str, output_base_dir: str, filter_clips=False):
-        """
-        Process all sample directories and maintain organized folder structure.
-        
-        Args:
-            samples_dir: Base directory containing sample folders
-            output_base_dir: Base output directory
-            filter_clips: If True, only process clips 0, 2, and 7
-        """
         # Get all subdirectories in samples
         all_sample_dirs = [d for d in os.listdir(samples_dir) 
                           if os.path.isdir(os.path.join(samples_dir, d))]
@@ -490,8 +459,17 @@ class DetectionPipeline:
             print(f"\n Processing sample {sample_idx}/{len(sample_dirs)}: {sample_dir}")
             
             # Determine ground truth and class for this sample
-            sample_ground_truth = sample_dir.lower().startswith("real")
-            sample_class = 'real' if sample_dir.lower().startswith('real') else 'falso'
+            sample_meta = {}
+            try:
+                sample_meta = self.detector.extract_filename_metadata(sample_dir)
+            except Exception:
+                sample_meta = {}
+            if (sample_meta or {}).get('sample_class') in ('real', 'falso'):
+                sample_ground_truth = (sample_meta.get('sample_class') == 'real')
+                sample_class = sample_meta.get('sample_class')
+            else:
+                sample_ground_truth = sample_dir.lower().startswith("real")
+                sample_class = 'real' if sample_dir.lower().startswith('real') else 'falso'
             
             # Mark start of new sample for statistics with ground truth and class
             self.stats.start_new_sample(sample_ground_truth, sample_class)
@@ -517,12 +495,7 @@ class DetectionPipeline:
         import shutil
         from pathlib import Path
         import stat
-        
-        """
-        Move processed files from temp directory to organized structure.
-        Handles Windows permission issues.
-        """
-
+    
         def on_rm_error(func, path, exc_info):
             """Force delete read-only files (Windows quirk)."""
             os.chmod(path, stat.S_IWRITE)

@@ -16,8 +16,8 @@ from dual_drone_pipeline import DualDroneDetectionPipeline
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Detect people in images using YOLOv11')
-    parser.add_argument('--model', default='models/people/yolo11n.pt', 
+    parser = argparse.ArgumentParser(description='Detect people in images using YOLOv26n')
+    parser.add_argument('--model', default='models/people/yolo26n.pt', 
                        help='Path to YOLO model file for people detection')
     parser.add_argument('--input', default='inputs/samples', 
                        help='Input directory containing sample folders')
@@ -27,12 +27,12 @@ def main():
                        help='Input directory containing sample folders without weapons (optional)')
     parser.add_argument('--output', default='output/detections', 
                        help='Output directory for processed images')
-    parser.add_argument('--confidence', type=float, default=0.5,
-                       help='Confidence threshold for detections')
-    parser.add_argument('--weapon-confidence', type=float, default=0.2,
-                       help='Confidence threshold for weapon detections (default: 0.2)')
+    parser.add_argument('--person-confidence', type=float, default=0.5,
+                       help='Confidence threshold for person detections')
+    parser.add_argument('--weapon-confidence', type=float, default=0.5,
+                       help='Confidence threshold for weapon detections')
     parser.add_argument('--sample-majority-threshold', type=int, default=1,
-                       help='Number of frames with weapon detections needed to classify sample as having weapons (default: 1)')
+                       help='Number of frames with weapon detections needed to classify sample as having weapons')
     parser.add_argument('--save-crops', action='store_true', default=True,
                        help='Save individual person crops (default: True)')
     parser.add_argument('--no-crops', action='store_true',
@@ -43,11 +43,11 @@ def main():
                        help='Process only clips 0, 2, and 7 (clip_000, clip_002, clip_007)') # (0,45,-45)
     parser.add_argument('--dual-drone', action='store_true',
                        help='Enable dual-drone mode with two input directories')
-    parser.add_argument('--input-drone1', default=None,
+    parser.add_argument('--input-drone1', default='inputs/samples/drone1',
                        help='Input directory for drone 1 (dual-drone mode)')
-    parser.add_argument('--input-drone2', default=None,
+    parser.add_argument('--input-drone2', default='inputs/samples/drone2',
                        help='Input directory for drone 2 (dual-drone mode)')
-    parser.add_argument('--association-threshold', type=float, default=2.0,
+    parser.add_argument('--association-threshold', type=float, default=100.0,
                        help='Distance threshold (meters) for associating detections across drones (default: 2.0)')
     
     args = parser.parse_args()
@@ -93,10 +93,9 @@ def main():
             return 1
         
         # Initialize dual-drone pipeline
-        print(f"Initializing DUAL-DRONE detection pipeline with model: {args.model}")
         pipeline = DualDroneDetectionPipeline(
             args.model, 
-            args.confidence,
+            person_confidence_threshold=args.person_confidence,
             enable_weapon_detection=enable_weapons,
             weapon_confidence_threshold=args.weapon_confidence,
             sample_majority_threshold=args.sample_majority_threshold,
@@ -107,51 +106,32 @@ def main():
         pipeline.save_crops = save_crops
         
         # Process dual-drone directories
-        print(f"Processing dual-drone samples:")
-        print(f"  Drone 1: {args.input_drone1}")
-        print(f"  Drone 2: {args.input_drone2}")
-        print(f"Output will be saved to: {args.output}")
-        print(f"Crop saving: {'Enabled' if save_crops else 'Disabled'}")
-        print(f"Weapon detection: {'Enabled' if enable_weapons else 'Disabled'}")
-        if enable_weapons:
-            print(f"Weapon confidence threshold: {args.weapon_confidence}")
-        print(f"Sample majority threshold: {args.sample_majority_threshold} frame(s)")
-        print(f"Association threshold: {args.association_threshold}m")
-        if args.filter_clips:
-            print(f"Filtering to clips: 0, 2, 7 only")
-        
         # Process dual-drone samples
         pipeline.process_dual_drone_samples(
             args.input_drone1,
             args.input_drone2,
             args.output,
-            filter_clips=args.filter_clips
+            #filter_clips=args.filter_clips
         )
-        
-        # Print statistics
+
+        # Print statistics summary
         pipeline.stats.print_summary()
-        print("\nDual-drone processing complete!")
+        
         return 0
     
     # Initialize single-drone pipeline
-    print(f"Initializing detection pipeline with model: {args.model}")
-    pipeline = DetectionPipeline(args.model, args.confidence, enable_weapon_detection=enable_weapons, weapon_confidence_threshold=args.weapon_confidence, sample_majority_threshold=args.sample_majority_threshold)
+    pipeline = DetectionPipeline(
+        args.model,
+        person_confidence_threshold=args.person_confidence,
+        enable_weapon_detection=enable_weapons,
+        weapon_confidence_threshold=args.weapon_confidence,
+        sample_majority_threshold=args.sample_majority_threshold,
+    )
     
     # Set crop saving preference
     pipeline.save_crops = save_crops
     
     # Process all sample directories
-    print(f"Processing samples from: {input_dir}")
-    print(f"Output will be saved to: {args.output}")
-    print(f"Crop saving: {'Enabled' if save_crops else 'Disabled'}")
-    print(f"Weapon detection: {'Enabled' if enable_weapons and pipeline.enable_weapon_detection else 'Disabled'}")
-    if enable_weapons and pipeline.enable_weapon_detection:
-        print(f"Weapon confidence threshold: {args.weapon_confidence}")
-    print(f"Sample majority threshold: {args.sample_majority_threshold} frame(s)")
-    print(f"Ground truth determined from filenames: 'real*' = has weapons, 'falso*' = no weapons")
-    if args.filter_clips:
-        print(f"Filtering to clips: 0, 2, 7 only")
-    
     # Check if input is a single directory with images or a parent directory with subdirectories
     if os.path.isdir(input_dir):
         # Check if it's a single directory with images or contains subdirectories
@@ -160,7 +140,6 @@ def main():
         
         if image_files:
             # Direct directory with images
-            print(f"Processing single directory with {len(image_files)} images")
             pipeline.process_directory(input_dir, args.output)
         else:
             # Directory with subdirectories
@@ -171,7 +150,6 @@ def main():
 
     # Print comprehensive statistics
     pipeline.stats.print_summary()
-    print("\nProcessing complete!")
     return 0
 
 
