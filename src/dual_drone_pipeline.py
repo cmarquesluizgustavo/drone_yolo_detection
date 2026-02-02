@@ -51,7 +51,7 @@ class DualDroneDetectionPipeline:
         self.person_confidence_threshold = person_confidence_threshold
         self.verbose = False  # set True to print per-frame debug output
 
-    def print_console_output(self, detections1, detections2, fused_detections):
+    def print_console_output(self, detections1, detections2, fused_detections, weapon_results1=None, weapon_results2=None):
         """Print console output with detection information."""
         from position_estimation import distance_from_position
         
@@ -75,6 +75,21 @@ class DualDroneDetectionPipeline:
         c1 = best1.get('person_confidence') if best1 else None
         c2 = best2.get('person_confidence') if best2 else None
         c_fused = best_fused.get('person_confidence') if best_fused else None
+
+        def best_weapon_conf(weapon_results):
+            if not weapon_results:
+                return None
+            try:
+                best = weapon_results[0] if len(weapon_results) > 0 else None
+                if not (best and best.get('has_weapons') and best.get('weapon_detections')):
+                    return 0.0
+                return max([w.get('weapon_confidence', w.get('confidence', 0.0)) for w in best.get('weapon_detections', [])])
+            except Exception:
+                return None
+
+        w1 = best_weapon_conf(weapon_results1)
+        w2 = best_weapon_conf(weapon_results2)
+        w_fused = best_fused.get('weapon_confidence') if best_fused else None
 
         # Format inline
         def fmt(val):
@@ -101,7 +116,10 @@ class DualDroneDetectionPipeline:
             "DETECTIONS: "
             f"c1={fmt(c1)}, "
             f"c2={fmt(c2)}, "
-            f"c_fused={fmt(c_fused)}"
+            f"c_fused={fmt(c_fused)}, "
+            f"w1={fmt(w1)}, "
+            f"w2={fmt(w2)}, "
+            f"w_fused={fmt(w_fused)}"
         )
     
     def add_fused_geopositions(self, fused_detections, detections1, detections2):
@@ -367,7 +385,7 @@ class DualDroneDetectionPipeline:
 
         # Print console output if needed
         if getattr(self, 'verbose', False):
-            self.print_console_output(detections1, detections2, fused_detections)
+            self.print_console_output(detections1, detections2, fused_detections, weapon_results1, weapon_results2)
 
         # Attach triangulated fused geoposition if implemented
         self.add_fused_geopositions(fused_detections, detections1, detections2)
@@ -518,7 +536,7 @@ class DualDroneDetectionPipeline:
             if i < len(weapon_results):
                 has_weapon = weapon_results[i].get('has_weapons', False)
                 if has_weapon and weapon_results[i].get('weapon_detections'):
-                    weapon_conf = max([w['confidence'] for w in weapon_results[i]['weapon_detections']])
+                    weapon_conf = max([w.get('weapon_confidence', w.get('confidence', 0.0)) for w in weapon_results[i]['weapon_detections']])
             
             # Choose color based on weapon detection
             color = (0, 0, 255) if has_weapon else (0, 255, 0)  # Red if weapon, Green otherwise
@@ -563,7 +581,7 @@ class DualDroneDetectionPipeline:
             if i < len(weapon_results1):
                 has_weapon = weapon_results1[i].get('has_weapons', False)
                 if has_weapon and weapon_results1[i].get('weapon_detections'):
-                    weapon_conf = max([w['confidence'] for w in weapon_results1[i]['weapon_detections']])
+                    weapon_conf = max([w.get('weapon_confidence', w.get('confidence', 0.0)) for w in weapon_results1[i]['weapon_detections']])
             
             # Get geoposition from detection
             person_geo = det.get('person_geoposition') or {}
@@ -602,7 +620,7 @@ class DualDroneDetectionPipeline:
             if i < len(weapon_results2):
                 has_weapon = weapon_results2[i].get('has_weapons', False)
                 if has_weapon and weapon_results2[i].get('weapon_detections'):
-                    weapon_conf = max([w['confidence'] for w in weapon_results2[i]['weapon_detections']])
+                    weapon_conf = max([w.get('weapon_confidence', w.get('confidence', 0.0)) for w in weapon_results2[i]['weapon_detections']])
             
             # Get geoposition from detection
             person_geo = det.get('person_geoposition') or {}

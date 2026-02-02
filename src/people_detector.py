@@ -44,8 +44,8 @@ class PeopleDetector:
         
         if self.enable_weapon_detection:
             try:
-                self.weapon_detector = WeaponDetector(confidence_threshold=weapon_confidence_threshold)
-                self.logger.info("Weapon detection enabled (confidence: %s)", weapon_confidence_threshold)
+                self.weapon_detector = WeaponDetector(weapon_confidence_threshold=weapon_confidence_threshold)
+                self.logger.info("Weapon detection enabled (WEAPON_CONFIDENCE=%s)", weapon_confidence_threshold)
             except Exception as e:
                 self.logger.warning("Failed to initialize weapon detector: %s", e)
                 self.enable_weapon_detection = False

@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+import os
 
 import cv2
 from ultralytics import YOLO
@@ -20,8 +21,24 @@ class WeaponDetector:
             self.model = YOLO(str(self.model_path))
             self.logger.info("Loaded weapon detection model: %s", self.model_path)
         except Exception as e:
-            self.logger.warning("Error loading weapon detection model: %s", e)
-            raise RuntimeError(f"Failed to load weapon detection model: {e}")
+            # Common on Windows when a .pt was created on Linux and contains pathlib.PosixPath objects.
+            # Unpickling then fails with: "cannot instantiate 'PosixPath' on your system".
+            if os.name == "nt" and "PosixPath" in str(e) and "cannot instantiate" in str(e):
+                try:
+                    import pathlib as _pathlib
+
+                    self.logger.warning(
+                        "Retrying weapon model load with PosixPath->WindowsPath patch (Windows compatibility workaround)."
+                    )
+                    _pathlib.PosixPath = _pathlib.WindowsPath  # type: ignore[attr-defined]
+                    self.model = YOLO(str(self.model_path))
+                    self.logger.info("Loaded weapon detection model (Windows path fix applied): %s", self.model_path)
+                except Exception as e2:
+                    self.logger.warning("Error loading weapon detection model after path fix: %s", e2)
+                    raise RuntimeError(f"Failed to load weapon detection model: {e2}")
+            else:
+                self.logger.warning("Error loading weapon detection model: %s", e)
+                raise RuntimeError(f"Failed to load weapon detection model: {e}")
 
     def detect_weapons(self, image):
         try:

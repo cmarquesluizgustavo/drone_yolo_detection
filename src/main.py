@@ -157,6 +157,13 @@ def main():
         
         # Handle weapon detection logic
         enable_weapons = not args.no_weapons
+
+        logging.getLogger(__name__).info(
+            "Thresholds: PERSON_CONFIDENCE=%s WEAPON_CONFIDENCE=%s (weapons_enabled=%s)",
+            args.person_confidence,
+            args.weapon_confidence,
+            enable_weapons,
+        )
         
         # Validate inputs
         if not os.path.exists(args.model):

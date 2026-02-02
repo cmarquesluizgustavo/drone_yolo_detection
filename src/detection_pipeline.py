@@ -230,7 +230,7 @@ class DetectionPipeline:
                 # Save each weapon crop separately
                 for weapon_idx, weapon_crop_info in enumerate(result['weapon_crops']):
                     weapon_crop = weapon_crop_info['crop']
-                    weapon_confidence = weapon_crop_info['confidence']
+                    weapon_confidence = weapon_crop_info.get('weapon_confidence', weapon_crop_info.get('confidence', 0.0))
                     weapon_class = weapon_crop_info['class']
                     
                     # Generate filename for weapon crop
