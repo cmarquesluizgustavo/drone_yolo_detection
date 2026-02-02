@@ -58,10 +58,19 @@ class DualDroneFusion:
         for det1 in detections1:
             best_match = None
             best_distance = float('inf')
+
+            # If det1 has no valid ground-plane coordinates, don't attempt cross-drone association.
+            if not (math.isfinite(det1.x) and math.isfinite(det1.y)):
+                fused_detections.append(self.detection_to_dict(det1))
+                continue
             
             # Find closest detection from drone 2
             for idx2, det2 in enumerate(detections2):
                 if idx2 in used_det2:
+                    continue
+
+                # Skip detections without valid coordinates.
+                if not (math.isfinite(det2.x) and math.isfinite(det2.y)):
                     continue
                 
                 # Compute ground-plane distance

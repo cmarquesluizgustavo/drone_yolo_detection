@@ -82,6 +82,10 @@ class PeopleDetector:
         # Pattern: (real|falso)_<distance>_<height>
         pattern = r'(real|falso)_(\d+)_(\d+)'
         match = re.search(pattern, basename, re.IGNORECASE)
+        if not match:
+            # Frame files are typically named frame_0001.jpg; the metadata is stored in
+            # the sample folder name (e.g., falso_05_02_clip_...).
+            match = re.search(pattern, str(path), re.IGNORECASE)
         
         if match:
             sample_class = match.group(1).lower()

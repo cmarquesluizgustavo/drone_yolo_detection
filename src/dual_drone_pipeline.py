@@ -5,6 +5,7 @@ from pathlib import Path
 from detection_pipeline import DetectionPipeline
 from detection_fusion import DualDroneFusion, Detection
 from camera import Camera
+from detection_statistics import DetectionStatistics
 
 class DualDroneDetectionPipeline:
     """Pipeline for processing synchronized video streams from two drones."""
@@ -37,13 +38,18 @@ class DualDroneDetectionPipeline:
         self.camera_drone1 = Camera()
         self.camera_drone2 = Camera()
         
-        # Share statistics between pipelines (use drone1's stats as primary)
-        self.stats = self.pipeline_drone1.stats
-        self.pipeline_drone2.stats = self.stats
+        # Keep separate stats so we can compare single-drone vs fusion quality.
+        self.stats_drone1 = self.pipeline_drone1.stats
+        self.stats_drone2 = self.pipeline_drone2.stats
+        self.stats_fused = DetectionStatistics(sample_majority_threshold=sample_majority_threshold)
+
+        # Backward-compatible alias: treat "stats" as the fused stats.
+        self.stats = self.stats_fused
         
         self.save_crops = True
         self.enable_weapon_detection = enable_weapon_detection
         self.person_confidence_threshold = person_confidence_threshold
+        self.verbose = False  # set True to print per-frame debug output
 
     def print_console_output(self, detections1, detections2, fused_detections):
         """Print console output with detection information."""
@@ -158,8 +164,9 @@ class DualDroneDetectionPipeline:
                 angle_output_dir = os.path.join(output_base_dir, f"angle_{angle}")
                 
                 # Reset statistics for this angle
-                self.stats.reset()
-                self.stats._in_batch_mode = True
+                for s in (self.stats_drone1, self.stats_drone2, self.stats_fused):
+                    s.reset()
+                    s._in_batch_mode = True
                 
                 # Process this angle
                 self._process_angle_directory(angle_dir_drone1, angle_dir_drone2, angle_output_dir, angle)
@@ -168,11 +175,17 @@ class DualDroneDetectionPipeline:
                 print(f"\n{'='*60}")
                 print(f"STATISTICS FOR ANGLE {angle}°")
                 print(f"{'='*60}")
-                self.stats.print_summary()
+                print("\n--- Drone 1 ---")
+                self.stats_drone1.print_summary()
+                print("\n--- Drone 2 ---")
+                self.stats_drone2.print_summary()
+                print("\n--- Fused ---")
+                self.stats_fused.print_summary()
         else:
             # No angle subdirectories, process directly
             self._process_angle_directory(input_dir_drone1, input_dir_drone2, output_base_dir, None)
-            self.stats.finalize()
+            for s in (self.stats_drone1, self.stats_drone2, self.stats_fused):
+                s.finalize()
     
     def _process_angle_directory(self, input_dir_drone1, input_dir_drone2, output_base_dir, angle=None):
         """Process a single angle directory or direct sample directory."""
@@ -221,7 +234,8 @@ class DualDroneDetectionPipeline:
                 sample_class = 'real' if sample_name.lower().startswith('real') else 'falso'
             
             # Mark start of new sample
-            self.stats.start_new_sample(sample_ground_truth, sample_class)
+            for s in (self.stats_drone1, self.stats_drone2, self.stats_fused):
+                s.start_new_sample(sample_ground_truth, sample_class)
             
             # Process synchronized sample pair
             self.process_synchronized_sample_pair(
@@ -235,7 +249,8 @@ class DualDroneDetectionPipeline:
             )
         
         # Finalize statistics for this angle
-        self.stats.finalize()
+        for s in (self.stats_drone1, self.stats_drone2, self.stats_fused):
+            s.finalize()
 
     def process_synchronized_sample_pair(self, sample_dir_drone1, sample_dir_drone2, output_base, sample_name, detections_base, crops_base, fused_base):
         from config import SUPPORTED_FORMATS
@@ -351,7 +366,8 @@ class DualDroneDetectionPipeline:
         )
 
         # Print console output if needed
-        self.print_console_output(detections1, detections2, fused_detections)
+        if getattr(self, 'verbose', False):
+            self.print_console_output(detections1, detections2, fused_detections)
 
         # Attach triangulated fused geoposition if implemented
         self.add_fused_geopositions(fused_detections, detections1, detections2)
@@ -397,35 +413,36 @@ class DualDroneDetectionPipeline:
         distances1 = [d['distance_m'] for d in detections1 if d.get('distance_m') is not None]
         distances2 = [d['distance_m'] for d in detections2 if d.get('distance_m') is not None]
 
-        pairs1 = []
-        pairs2 = []
         pairs1_p = []
         pairs1_pitch = []
         pairs2_p = []
         pairs2_pitch = []
+        pairs1_primary = []
+        pairs2_primary = []
 
         if real_distance is not None:
             for d in detections1:
                 if d.get('distance_m') is not None:
-                    pairs1.append((d['distance_m'], real_distance))
+                    pairs1_primary.append((d['distance_m'], real_distance))
                 if d.get('distance_pinhole_m') is not None:
                     pairs1_p.append((d['distance_pinhole_m'], real_distance))
                 if d.get('distance_pitch_m') is not None:
                     pairs1_pitch.append((d['distance_pitch_m'], real_distance))
             for d in detections2:
                 if d.get('distance_m') is not None:
-                    pairs2.append((d['distance_m'], real_distance))
+                    pairs2_primary.append((d['distance_m'], real_distance))
                 if d.get('distance_pinhole_m') is not None:
                     pairs2_p.append((d['distance_pinhole_m'], real_distance))
                 if d.get('distance_pitch_m') is not None:
                     pairs2_pitch.append((d['distance_pitch_m'], real_distance))
         
         # Individual drone stats
-        self.stats.add_image_results(
+        self.stats_drone1.add_image_results(
             len(detections1), weapons_detected_d1, 
             len([r for r in weapon_results1 if r.get('has_weapons', False)]),
             has_weapons_gt,
             distances=distances1,
+            distance_pairs=pairs1_primary,
             real_distance=real_distance,
             cam_height_m=cam_height_m,
             sample_class=sample_class,
@@ -433,29 +450,54 @@ class DualDroneDetectionPipeline:
             distance_pairs_pitch=pairs1_pitch,
         )
         
-        self.stats.add_image_results(
+        self.stats_drone2.add_image_results(
             len(detections2), weapons_detected_d2,
             len([r for r in weapon_results2 if r.get('has_weapons', False)]),
             has_weapons_gt,
             distances=distances2,
+            distance_pairs=pairs2_primary,
             real_distance=real_distance,
             cam_height_m=cam_height_m,
             sample_class=sample_class,
             distance_pairs_pinhole=pairs2_p,
             distance_pairs_pitch=pairs2_pitch,
         )
-        
-        # Fused detection stats (using fused confidence)
-        self.stats.add_image_results(
+
+        # Fused-distance RMSE pairs: derive per-drone distance to fused geoposition.
+        fused_pairs = []
+        if real_distance is not None:
+            from position_estimation import distance_from_position
+            for d in fused_detections:
+                if d.get('source') != 'fused':
+                    continue
+                geo = d.get('fused_geoposition')
+                if not (geo and isinstance(geo, dict)):
+                    continue
+                lat = geo.get('latitude')
+                lon = geo.get('longitude')
+                if lat is None or lon is None:
+                    continue
+                try:
+                    dist1_f = distance_from_position(self.camera_drone1, float(lat), float(lon))
+                    dist2_f = distance_from_position(self.camera_drone2, float(lat), float(lon))
+                except Exception:
+                    continue
+                fused_pairs.append((dist1_f, real_distance))
+                fused_pairs.append((dist2_f, real_distance))
+
+        # Fused detection stats (weapon metrics + fusion-quality RMSE)
+        self.stats_fused.add_image_results(
             len(fused_detections), weapons_fused,
             weapons_fused,
             has_weapons_gt,
             distances=None,
-            real_distance=None,
-            cam_height_m=None,
+            distance_pairs=None,
+            real_distance=real_distance,
+            cam_height_m=cam_height_m,
             sample_class=sample_class,
             distance_pairs_pinhole=None,
-            distance_pairs_pitch=None
+            distance_pairs_pitch=None,
+            distance_pairs_fused=fused_pairs,
         )
         
           # No console logging
@@ -524,20 +566,24 @@ class DualDroneDetectionPipeline:
                     weapon_conf = max([w['confidence'] for w in weapon_results1[i]['weapon_detections']])
             
             # Get geoposition from detection
-            person_geo = det.get('person_geoposition', {})
-            person_lat = person_geo.get('latitude', 0.0) if person_geo else 0.0
-            person_lon = person_geo.get('longitude', 0.0) if person_geo else 0.0
-            
-            # Convert to ground-plane coordinates for matching
-            x, y = 0.0, 0.0
-            if person_lat != 0.0 and person_lon != 0.0:
-                x, y = GeoConverter.geo_to_xy(person_lat, person_lon)
+            person_geo = det.get('person_geoposition') or {}
+            person_lat = person_geo.get('latitude') if isinstance(person_geo, dict) else None
+            person_lon = person_geo.get('longitude') if isinstance(person_geo, dict) else None
+
+            # Convert to ground-plane coordinates for matching.
+            # If no valid geoposition, mark as NaN so fusion won't associate it.
+            if person_lat is None or person_lon is None:
+                x, y = float('nan'), float('nan')
+                person_lat = 0.0
+                person_lon = 0.0
+            else:
+                x, y = GeoConverter.geo_to_xy(float(person_lat), float(person_lon))
             
             detection_objs1.append(Detection(
                 bbox=tuple(det['bbox']),
                 person_confidence=det['person_confidence'],
-                distance_m=det.get('distance_m', 0.0),
-                bearing_deg=det.get('bearing_deg', 0.0),
+                distance_m=(det.get('distance_m') if det.get('distance_m') is not None else 0.0),
+                bearing_deg=(det.get('bearing_deg') if det.get('bearing_deg') is not None else 0.0),
                 x=x,
                 y=y,
                 lat=person_lat,
@@ -559,20 +605,23 @@ class DualDroneDetectionPipeline:
                     weapon_conf = max([w['confidence'] for w in weapon_results2[i]['weapon_detections']])
             
             # Get geoposition from detection
-            person_geo = det.get('person_geoposition', {})
-            person_lat = person_geo.get('latitude', 0.0) if person_geo else 0.0
-            person_lon = person_geo.get('longitude', 0.0) if person_geo else 0.0
-            
-            # Convert to ground-plane coordinates for matching
-            x, y = 0.0, 0.0
-            if person_lat != 0.0 and person_lon != 0.0:
-                x, y = GeoConverter.geo_to_xy(person_lat, person_lon)
+            person_geo = det.get('person_geoposition') or {}
+            person_lat = person_geo.get('latitude') if isinstance(person_geo, dict) else None
+            person_lon = person_geo.get('longitude') if isinstance(person_geo, dict) else None
+
+            # Convert to ground-plane coordinates for matching.
+            if person_lat is None or person_lon is None:
+                x, y = float('nan'), float('nan')
+                person_lat = 0.0
+                person_lon = 0.0
+            else:
+                x, y = GeoConverter.geo_to_xy(float(person_lat), float(person_lon))
             
             detection_objs2.append(Detection(
                 bbox=tuple(det['bbox']),
                 person_confidence=det['person_confidence'],
-                distance_m=det.get('distance_m', 0.0),
-                bearing_deg=det.get('bearing_deg', 0.0),
+                distance_m=(det.get('distance_m') if det.get('distance_m') is not None else 0.0),
+                bearing_deg=(det.get('bearing_deg') if det.get('bearing_deg') is not None else 0.0),
                 x=x,
                 y=y,
                 lat=person_lat,
@@ -602,7 +651,7 @@ class DualDroneDetectionPipeline:
                     dist2 = det2.get('distance_m')
                     bearing2 = det2.get('bearing_deg')
                     
-                    if all([dist1, bearing1, dist2, bearing2]):
+                    if all(v is not None for v in [dist1, bearing1, dist2, bearing2]):
                         # Triangulate fused position
                         fused_lat, fused_lon = fuse_target_geoposition(
                             self.camera_drone1, dist1, bearing1,
@@ -710,7 +759,7 @@ class DualDroneDetectionPipeline:
         return combined
 
     def detect_people_with_estimation(self, image_path, image, drone_id):
-        """Detect people and estimate their positions using the appropriate drone's detector."""
+        """Detect people and estimate their distance/bearing/geoposition for fusion."""
         from position_estimation import estimate_distance, estimate_distance_2, estimate_bearing, simple_target_geoposition
         
         detector = self.pipeline_drone1.detector if drone_id == 1 else self.pipeline_drone2.detector
@@ -725,27 +774,6 @@ class DualDroneDetectionPipeline:
             classes=[0],
             verbose=False,
         )
-
-        # Debug: check what the model returns (raw box count before confidence filtering)
-        total_boxes = 0
-        try:
-            for result in results:
-                if result.boxes is not None:
-                    total_boxes += len(result.boxes)
-        except Exception:
-            total_boxes = 0
-
-        if drone_id == 1 and total_boxes == 0:
-            print(
-                f"    DEBUG D{drone_id}: No detections - image shape: {image.shape}, "
-                f"conf threshold: {self.person_confidence_threshold}, frame: {os.path.basename(image_path)}"
-            )
-
-        # Extract metadata from filename (for testing/comparison purposes)
-        # NOTE: PeopleDetector.extract_filename_metadata returns keys: height_m, distance_m, sample_class
-        file_data = detector.extract_filename_metadata(image_path)
-        cam_height_m = file_data.get('height_m')
-        cam_pitch_deg = file_data.get('pitch_deg') or file_data.get('camera_pitch_deg')
 
         detections_info = []
         for result in results:
@@ -764,37 +792,46 @@ class DualDroneDetectionPipeline:
                         # Always compute pinhole estimate
                         distance_pinhole_m = estimate_distance(camera, person_height_px) if person_height_px > 0 else None
 
-                        # Compute pitch-based estimate using telemetry data from txt file
                         distance_pitch_m = None
-                        if camera.height_m > 0 and camera.pitch_deg != 0:
-                            distance_pitch_m = estimate_distance_2(camera, y_bottom)
-
-                        # Choose primary distance for downstream use
-                        # Prefer pitch-based if available (more accurate with real telemetry)
-                        if distance_pitch_m is not None:
-                            distance_m = distance_pitch_m
-                            distance_method = 'pitch_telemetry'
-                        elif distance_pinhole_m is not None:
-                            distance_m = distance_pinhole_m
-                            distance_method = 'pinhole'
-                        else:
-                            distance_m = None
-                            distance_method = None
+                        if camera.height_m > 0:
+                            try:
+                                distance_pitch_m = estimate_distance_2(camera, y_bottom)
+                            except (ZeroDivisionError, ValueError, TypeError):
+                                distance_pitch_m = None
 
                         # Calculate bearing from camera to target
                         bearing_deg = estimate_bearing(camera, x_center)
+
+                        # Choose a primary distance for downstream fusion/triangulation.
+                        distance_m = None
+                        if distance_pitch_m is not None:
+                            distance_m = float(distance_pitch_m)
+                        elif distance_pinhole_m is not None:
+                            distance_m = float(distance_pinhole_m)
                         
-                        # Calculate geoposition of detected person
-                        person_lat, person_lon = None, None
-                        if distance_m is not None and bearing_deg is not None and camera.lat != 0 and camera.lon != 0:
-                            person_lat, person_lon = simple_target_geoposition(camera, distance_m, bearing_deg)
+                        # Calculate geoposition of detected person (when telemetry lat/lon is available).
+                        person_lat_pinhole, person_lon_pinhole = None, None
+                        if distance_pinhole_m is not None and bearing_deg is not None and camera.lat != 0 and camera.lon != 0:
+                            person_lat_pinhole, person_lon_pinhole = simple_target_geoposition(camera, float(distance_pinhole_m), float(bearing_deg))
+
+                        person_lat_pitch, person_lon_pitch = None, None
+                        if distance_pitch_m is not None and bearing_deg is not None and camera.lat != 0 and camera.lon != 0:
+                            person_lat_pitch, person_lon_pitch = simple_target_geoposition(camera, float(distance_pitch_m), float(bearing_deg))
+
+                        # A single geoposition used for matching (prefer pitch-based when available).
+                        person_geoposition = None
+                        if person_lat_pitch is not None and person_lon_pitch is not None:
+                            person_geoposition = {'latitude': person_lat_pitch, 'longitude': person_lon_pitch}
+                        elif person_lat_pinhole is not None and person_lon_pinhole is not None:
+                            person_geoposition = {'latitude': person_lat_pinhole, 'longitude': person_lon_pinhole}
+
+
 
                         detections_info.append({
                             'bbox': [int(x1), int(y1), int(x2), int(y2)],
                             'confidence': confidence,
                             'person_confidence': confidence,
                             'distance_m': distance_m,
-                            'distance_method': distance_method,
                             'distance_pinhole_m': distance_pinhole_m,
                             'distance_pitch_m': distance_pitch_m,
                             'bearing_deg': bearing_deg,
@@ -804,10 +841,15 @@ class DualDroneDetectionPipeline:
                             'cam_roll_deg': camera.roll_deg,
                             'cam_lat': camera.lat,
                             'cam_lon': camera.lon,
-                            'person_geoposition': {
-                                'latitude': person_lat,
-                                'longitude': person_lon
-                            } if person_lat is not None else None,
+                            'person_geoposition': person_geoposition,
+                            'geo_position_pinhole': {
+                                'latitude': person_lat_pinhole,
+                                'longitude': person_lon_pinhole
+                            } if person_lat_pinhole is not None else None,
+                            'geo_position_pitch': {
+                                'latitude': person_lat_pitch,
+                                'longitude': person_lon_pitch
+                            } if person_lat_pitch is not None else None,
                         })
         return detections_info
 
@@ -818,6 +860,6 @@ class DualDroneDetectionPipeline:
         
         for det in detections:
             if det.get('bbox') == list(bbox) or det.get('bbox') == bbox:
-                return det.get('person_geoposition')
+                return det.get('geo_position_pinhole')
         
         return None

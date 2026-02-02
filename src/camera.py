@@ -66,7 +66,12 @@ class Camera:
         else:
             # Extract pattern from filename: (real|falso)_<distance>_<height>
             basename = os.path.basename(file_path)
-            match = re.match(r'(real|falso)_(\d+)_(\d+)', basename)
+            pattern = r'(real|falso)_(\d+)_(\d+)'
+            match = re.search(pattern, basename, re.IGNORECASE)
+            if not match:
+                # Frame paths usually look like: .../<sample_name>/frames/frame_0001.jpg
+                # so the metadata is in the parent folder name, not the frame filename.
+                match = re.search(pattern, str(file_path), re.IGNORECASE)
             if not match:
                 return False
             
@@ -82,6 +87,12 @@ class Camera:
             root_path = Path(*path_parts[:path_parts.index('inputs')]) if 'inputs' in path_parts else Path.cwd()
             video_base_name = f"{match.group(1)}_{match.group(2)}_{match.group(3)}"
             txt_path = root_path / 'inputs' / 'raw' / drone_id / angle / f"{video_base_name}.txt"
+
+            # Also set camera height from the dataset naming convention.
+            try:
+                self.height_m = float(match.group(3))
+            except ValueError:
+                pass
         
         # Load telemetry from txt file
         if not os.path.exists(txt_path):
@@ -97,7 +108,10 @@ class Camera:
                     
                     try:
                         if key == 'pitch':
-                            self.pitch_deg = float(value)
+                            # Telemetry pitch in the raw txt files is typically negative when the
+                            # camera/drone is pitched downward (nose-down). Our geometry assumes
+                            # positive pitch means "tilted down".
+                            self.pitch_deg = -float(value)
                         elif key == 'roll':
                             self.roll_deg = float(value)
                         elif key == 'yaw':

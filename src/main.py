@@ -4,8 +4,12 @@ Main script to run people detection pipeline.
 """
 
 import argparse
+import io
+import logging
+import logging.handlers
 import os
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Add current directory to path for imports
@@ -13,6 +17,87 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from detection_pipeline import DetectionPipeline
 from dual_drone_pipeline import DualDroneDetectionPipeline
+
+
+def _parse_log_level(level: str) -> int:
+    if not level:
+        return logging.INFO
+    level_name = str(level).upper().strip()
+    return getattr(logging, level_name, logging.INFO)
+
+
+def setup_logging(log_dir: Path, log_level: int) -> Path:
+    """Configure root logger to log to console and a rotating file."""
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    root_logger = logging.getLogger()
+    for handler in list(root_logger.handlers):
+        root_logger.removeHandler(handler)
+
+    root_logger.setLevel(log_level)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(log_level)
+    console_handler.setFormatter(formatter)
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_path,
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(log_level)
+    file_handler.setFormatter(formatter)
+
+    root_logger.addHandler(console_handler)
+    root_logger.addHandler(file_handler)
+
+    # Keep third-party libraries from being overly chatty by default.
+    logging.getLogger("ultralytics").setLevel(max(log_level, logging.WARNING))
+
+    root_logger.info("Logging initialized: level=%s file=%s", logging.getLevelName(log_level), log_path)
+    return log_path
+
+
+class _TeeTextIO(io.TextIOBase):
+    """Write text to two streams (e.g., console + file)."""
+
+    def __init__(self, stream_a, stream_b):
+        super().__init__()
+        self._a = stream_a
+        self._b = stream_b
+
+    def write(self, s):
+        n1 = self._a.write(s)
+        self._b.write(s)
+        return n1
+
+    def flush(self):
+        try:
+            self._a.flush()
+        finally:
+            self._b.flush()
+
+
+def _tee_console_to_file(console_path: Path):
+    """Duplicate stdout/stderr to a file. Returns (restore_fn, file_handle)."""
+    console_path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(console_path, "a", encoding="utf-8", buffering=1)
+    old_out, old_err = sys.stdout, sys.stderr
+    sys.stdout = _TeeTextIO(old_out, fh)
+    sys.stderr = _TeeTextIO(old_err, fh)
+
+    def _restore():
+        sys.stdout = old_out
+        sys.stderr = old_err
+
+    return _restore, fh
 
 
 def main():
@@ -49,108 +134,133 @@ def main():
                        help='Input directory for drone 2 (dual-drone mode)')
     parser.add_argument('--association-threshold', type=float, default=100.0,
                        help='Distance threshold (meters) for associating detections across drones (default: 2.0)')
+
+    parser.add_argument('--log-level', default='INFO',
+                        help='Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)')
+    parser.add_argument('--log-dir', default='logs/',
+                        help='Directory to write log files (default: logs/)')
     
     args = parser.parse_args()
+
+    # Configure logging early so constructor logs are captured.
+    log_level = _parse_log_level(args.log_level)
+    log_dir = Path(args.log_dir) if args.log_dir else (Path(args.output) / "logs")
+    log_path = setup_logging(log_dir=log_dir, log_level=log_level)
+
+    # Also capture any print-based console output directly to a file.
+    console_log_path = log_path.with_name(f"{log_path.stem}_console.log")
+    restore_console, console_fh = _tee_console_to_file(console_log_path)
     
-    # Handle crop saving logic
-    save_crops = args.save_crops and not args.no_crops
-    
-    # Handle weapon detection logic
-    enable_weapons = not args.no_weapons
-    
-    # Validate inputs
-    if not os.path.exists(args.model):
-        print(f"Error: Model file not found: {args.model}")
-        return 1
-    
-    # Determine input source
-    input_dir = args.input
-    
-    # If specific weapon/no-weapon directories are provided, use them
-    if args.input_with_weapons and os.path.exists(args.input_with_weapons):
-        input_dir = args.input_with_weapons
-    elif args.input_without_weapons and os.path.exists(args.input_without_weapons):
-        input_dir = args.input_without_weapons
-    elif not os.path.exists(input_dir):
-        print(f"Error: Input directory not found: {input_dir}")
-        return 1
-    
-    
-    # Create output directory
-    Path(args.output).mkdir(parents=True, exist_ok=True)
-    
-    # Check for dual-drone mode
-    if args.dual_drone:
-        if not args.input_drone1 or not args.input_drone2:
-            print("Error: Dual-drone mode requires both --input-drone1 and --input-drone2")
-            return 1
+    try:
+        # Handle crop saving logic
+        save_crops = args.save_crops and not args.no_crops
         
-        if not os.path.exists(args.input_drone1):
-            print(f"Error: Drone 1 input directory not found: {args.input_drone1}")
-            return 1
-        if not os.path.exists(args.input_drone2):
-            print(f"Error: Drone 2 input directory not found: {args.input_drone2}")
-            return 1
+        # Handle weapon detection logic
+        enable_weapons = not args.no_weapons
         
-        # Initialize dual-drone pipeline
-        pipeline = DualDroneDetectionPipeline(
-            args.model, 
+        # Validate inputs
+        if not os.path.exists(args.model):
+            logging.getLogger(__name__).error("Model file not found: %s", args.model)
+            return 1
+    
+        # Determine input source
+        input_dir = args.input
+    
+        # If specific weapon/no-weapon directories are provided, use them
+        if args.input_with_weapons and os.path.exists(args.input_with_weapons):
+            input_dir = args.input_with_weapons
+        elif args.input_without_weapons and os.path.exists(args.input_without_weapons):
+            input_dir = args.input_without_weapons
+        elif not os.path.exists(input_dir):
+            logging.getLogger(__name__).error("Input directory not found: %s", input_dir)
+            return 1
+    
+        
+        # Create output directory
+        Path(args.output).mkdir(parents=True, exist_ok=True)
+    
+        # Check for dual-drone mode
+        if args.dual_drone:
+            if not args.input_drone1 or not args.input_drone2:
+                logging.getLogger(__name__).error("Dual-drone mode requires both --input-drone1 and --input-drone2")
+                return 1
+            
+            if not os.path.exists(args.input_drone1):
+                logging.getLogger(__name__).error("Drone 1 input directory not found: %s", args.input_drone1)
+                return 1
+            if not os.path.exists(args.input_drone2):
+                logging.getLogger(__name__).error("Drone 2 input directory not found: %s", args.input_drone2)
+                return 1
+            
+            # Initialize dual-drone pipeline
+            pipeline = DualDroneDetectionPipeline(
+                args.model, 
+                person_confidence_threshold=args.person_confidence,
+                enable_weapon_detection=enable_weapons,
+                weapon_confidence_threshold=args.weapon_confidence,
+                sample_majority_threshold=args.sample_majority_threshold,
+                association_threshold=args.association_threshold
+            )
+            
+            # Set crop saving preference
+            pipeline.save_crops = save_crops
+            
+            # Process dual-drone samples
+            pipeline.process_dual_drone_samples(
+                args.input_drone1,
+                args.input_drone2,
+                args.output,
+                #filter_clips=args.filter_clips
+            )
+
+            # Print statistics summary
+            print("\n=== DUAL-DRONE SUMMARY ===")
+            print("\n--- Drone 1 ---")
+            pipeline.stats_drone1.print_summary()
+            print("\n--- Drone 2 ---")
+            pipeline.stats_drone2.print_summary()
+            print("\n--- Fused ---")
+            pipeline.stats_fused.print_summary()
+            
+            return 0
+    
+        # Initialize single-drone pipeline
+        pipeline = DetectionPipeline(
+            args.model,
             person_confidence_threshold=args.person_confidence,
             enable_weapon_detection=enable_weapons,
             weapon_confidence_threshold=args.weapon_confidence,
             sample_majority_threshold=args.sample_majority_threshold,
-            association_threshold=args.association_threshold
         )
         
         # Set crop saving preference
         pipeline.save_crops = save_crops
         
-        # Process dual-drone directories
-        # Process dual-drone samples
-        pipeline.process_dual_drone_samples(
-            args.input_drone1,
-            args.input_drone2,
-            args.output,
-            #filter_clips=args.filter_clips
-        )
-
-        # Print statistics summary
-        pipeline.stats.print_summary()
-        
-        return 0
-    
-    # Initialize single-drone pipeline
-    pipeline = DetectionPipeline(
-        args.model,
-        person_confidence_threshold=args.person_confidence,
-        enable_weapon_detection=enable_weapons,
-        weapon_confidence_threshold=args.weapon_confidence,
-        sample_majority_threshold=args.sample_majority_threshold,
-    )
-    
-    # Set crop saving preference
-    pipeline.save_crops = save_crops
-    
-    # Process all sample directories
-    # Check if input is a single directory with images or a parent directory with subdirectories
-    if os.path.isdir(input_dir):
-        # Check if it's a single directory with images or contains subdirectories
-        image_files = [f for f in os.listdir(input_dir) 
-                      if os.path.splitext(f)[1].lower() in ['.jpg', '.jpeg', '.png', '.bmp']]
-        
-        if image_files:
-            # Direct directory with images
-            pipeline.process_directory(input_dir, args.output)
+        # Process all sample directories
+        # Check if input is a single directory with images or a parent directory with subdirectories
+        if os.path.isdir(input_dir):
+            # Check if it's a single directory with images or contains subdirectories
+            image_files = [f for f in os.listdir(input_dir) 
+                          if os.path.splitext(f)[1].lower() in ['.jpg', '.jpeg', '.png', '.bmp']]
+            
+            if image_files:
+                # Direct directory with images
+                pipeline.process_directory(input_dir, args.output)
+            else:
+                # Directory with subdirectories
+                pipeline.process_all_sample_directories(input_dir, args.output, filter_clips=args.filter_clips)
         else:
-            # Directory with subdirectories
-            pipeline.process_all_sample_directories(input_dir, args.output, filter_clips=args.filter_clips)
-    else:
-        print(f"Error: Input path does not exist: {input_dir}")
-        return 1
+            logging.getLogger(__name__).error("Input path does not exist: %s", input_dir)
+            return 1
 
-    # Print comprehensive statistics
-    pipeline.stats.print_summary()
-    return 0
+        # Print comprehensive statistics
+        pipeline.stats.print_summary()
+        return 0
+    finally:
+        try:
+            restore_console()
+        finally:
+            console_fh.close()
 
 
 if __name__ == "__main__":

@@ -9,7 +9,14 @@ def estimate_distance_2(camera, y_pixel):
     delta_px = y_pixel - (camera.image_height_px / 2.0)
     pixel_angle_deg = (delta_px / (camera.image_height_px / 2.0)) * (camera.vertical_fov_deg / 2.0)
     alpha_deg = camera.pitch_deg + pixel_angle_deg
-    return camera.height_m / math.tan(math.radians(alpha_deg))
+
+    # Guard against invalid/unstable geometry: near horizon (tan ~ 0) or above horizon (alpha <= 0)
+    if alpha_deg <= 0.0:
+        return None
+    tan_alpha = math.tan(math.radians(alpha_deg))
+    if abs(tan_alpha) < 1e-6:
+        return None
+    return camera.height_m / tan_alpha
 
 def estimate_bearing(camera, x_pixel):
     delta_px = x_pixel - (camera.image_width_px / 2.0)

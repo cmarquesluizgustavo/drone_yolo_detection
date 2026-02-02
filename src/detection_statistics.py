@@ -51,6 +51,13 @@ class DetectionStatistics:
         self.distance_pairs_pinhole = []  # (est_pinhole, real)
         self.distance_pairs_pitch = []     # (est_pitch_based, real)
 
+        # Fused (dual-drone) RMSE evaluation (distance derived from fused geoposition)
+        self.distance_pairs_fused = []  # (est_fused_distance, real)
+
+        # Method-specific RMSE evaluation by (class, distance, height)
+        self.distance_pairs_pinhole_by_combo = {}  # {(cls, dist, height): [(est, real), ...]}
+        self.distance_pairs_pitch_by_combo = {}    # {(cls, dist, height): [(est, real), ...]}
+
         # Method-specific RMSE evaluation by (class, distance, height, camera_pitch)
         self.distance_pairs_pinhole_by_combo_pitch = {}  # {(cls, dist, height, pitch): [(est, real), ...]}
         self.distance_pairs_pitch_by_combo_pitch = {}     # {(cls, dist, height, pitch): [(est, real), ...]}
@@ -128,11 +135,23 @@ class DetectionStatistics:
                 self.sample_metrics_by_class[self.current_sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
             self.sample_metrics_by_class[self.current_sample_class][metric_result] += 1
     
-    def add_image_results(self, num_people, num_weapons, people_with_weapons_count, has_weapons_ground_truth,
-                          distances=None, real_distance=None, cam_height_m=None,
-                          sample_class=None,
-                          distance_pairs_pinhole=None,
-                          distance_pairs_pitch=None):
+    def add_image_results(
+        self,
+        num_people,
+        num_weapons,
+        people_with_weapons_count,
+        has_weapons_ground_truth,
+        distances=None,
+        distance_pairs=None,
+        real_distance=None,
+        cam_height_m=None,
+        sample_class=None,
+        camera_pitch_annotated_deg=None,
+        camera_pitch_real_deg=None,
+        distance_pairs_pinhole=None,
+        distance_pairs_pitch=None,
+        distance_pairs_fused=None,
+    ):
         """Add results from processing one image."""
 
         self.total_images += 1
@@ -194,18 +213,51 @@ class DetectionStatistics:
         if distances:
             self.distances.extend(distances)
             self.people_with_distance += len(distances)
-        # Add (estimated, real) pairs for RMSE
-            # Track by (distance, height) for aggregation across classes
+
+        # Store generic (estimated, real) RMSE pairs when provided.
+        if distance_pairs:
+            self.distance_pairs.extend(distance_pairs)
+
+            # Track by height
+            if cam_height_m is not None:
+                if cam_height_m not in self.distance_pairs_by_height:
+                    self.distance_pairs_by_height[cam_height_m] = []
+                self.distance_pairs_by_height[cam_height_m].extend(distance_pairs)
+
+            # Track by (class, distance, height)
+            if sample_class is not None and real_distance is not None and cam_height_m is not None:
+                combo_key = (sample_class, real_distance, cam_height_m)
+                if combo_key not in self.distance_pairs_by_combination:
+                    self.distance_pairs_by_combination[combo_key] = []
+                self.distance_pairs_by_combination[combo_key].extend(distance_pairs)
+
+            # Track by (distance, height) aggregated across classes
             if real_distance is not None and cam_height_m is not None:
                 dist_height_key = (real_distance, cam_height_m)
                 if dist_height_key not in self.distance_pairs_by_dist_height:
                     self.distance_pairs_by_dist_height[dist_height_key] = []
+                self.distance_pairs_by_dist_height[dist_height_key].extend(distance_pairs)
+
+            # Track by (class, distance, height, camera pitch)
+            pitch_bucket = camera_pitch_real_deg if camera_pitch_real_deg is not None else camera_pitch_annotated_deg
+            if sample_class is not None and real_distance is not None and cam_height_m is not None and pitch_bucket is not None:
+                combo_pitch_key = (sample_class, real_distance, cam_height_m, pitch_bucket)
+                if combo_pitch_key not in self.distance_pairs_by_combination_with_pitch:
+                    self.distance_pairs_by_combination_with_pitch[combo_pitch_key] = []
+                self.distance_pairs_by_combination_with_pitch[combo_pitch_key].extend(distance_pairs)
+
+                dist_height_pitch_key = (real_distance, cam_height_m, pitch_bucket)
+                if dist_height_pitch_key not in self.distance_pairs_by_dist_height_pitch:
+                    self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key] = []
+                self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key].extend(distance_pairs)
 
         # Store method-specific pairs (overall only; use these to compare methods).
         if distance_pairs_pinhole:
             self.distance_pairs_pinhole.extend(distance_pairs_pinhole)
         if distance_pairs_pitch:
             self.distance_pairs_pitch.extend(distance_pairs_pitch)
+        if distance_pairs_fused:
+            self.distance_pairs_fused.extend(distance_pairs_fused)
 
         # Store method-specific pairs by (class, distance, height) when possible.
         if sample_class is not None and real_distance is not None and cam_height_m is not None:
@@ -220,6 +272,21 @@ class DetectionStatistics:
                 if combo_key not in self.distance_pairs_pitch_by_combo:
                     self.distance_pairs_pitch_by_combo[combo_key] = []
                 self.distance_pairs_pitch_by_combo[combo_key].extend(distance_pairs_pitch)
+
+            # Also track method-specific pairs by pitch bucket (if available).
+            pitch_bucket = camera_pitch_real_deg if camera_pitch_real_deg is not None else camera_pitch_annotated_deg
+            if pitch_bucket is not None:
+                combo_pitch_key = (sample_class, real_distance, cam_height_m, pitch_bucket)
+
+                if distance_pairs_pinhole:
+                    if combo_pitch_key not in self.distance_pairs_pinhole_by_combo_pitch:
+                        self.distance_pairs_pinhole_by_combo_pitch[combo_pitch_key] = []
+                    self.distance_pairs_pinhole_by_combo_pitch[combo_pitch_key].extend(distance_pairs_pinhole)
+
+                if distance_pairs_pitch:
+                    if combo_pitch_key not in self.distance_pairs_pitch_by_combo_pitch:
+                        self.distance_pairs_pitch_by_combo_pitch[combo_pitch_key] = []
+                    self.distance_pairs_pitch_by_combo_pitch[combo_pitch_key].extend(distance_pairs_pitch)
 
     def compute_rmse(self, distance_pairs=None):
         """Compute RMSE for distance estimation (only where real distance is available)."""
@@ -465,6 +532,7 @@ class DetectionStatistics:
         # Print method comparison RMSE (pinhole vs pitch-based)
         rmse_pinhole = self.compute_rmse(self.distance_pairs_pinhole)
         rmse_pitch = self.compute_rmse(self.distance_pairs_pitch)
+        rmse_fused = self.compute_rmse(self.distance_pairs_fused)
         if rmse_pinhole is not None or rmse_pitch is not None:
             print("\nDISTANCE ESTIMATION METHOD COMPARISON:")
             if rmse_pinhole is not None:
@@ -475,6 +543,9 @@ class DetectionStatistics:
                 print(f"   PITCH-BASED RMSE: {rmse_pitch:.3f}m ({len(self.distance_pairs_pitch)} measurements)")
             else:
                 print("   PITCH-BASED RMSE: N/A")
+
+        if rmse_fused is not None:
+            print(f"   FUSED-GEO DISTANCE RMSE: {rmse_fused:.3f}m ({len(self.distance_pairs_fused)} measurements)")
 
         # Method comparison by (class, distance, height, camera pitch)
         if self.distance_pairs_pinhole_by_combo_pitch or self.distance_pairs_pitch_by_combo_pitch:

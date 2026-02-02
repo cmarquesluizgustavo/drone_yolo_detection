@@ -97,6 +97,8 @@ python src/main.py --model models/people/yolo11n.pt \
 - `--save-crops`: Save person crops (default: enabled)
 - `--no-crops`: Disable saving person crops
 - `--no-weapons`: Disable weapon detection
+- `--log-level`: Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)
+- `--log-dir`: Directory to write log files (default: `<output>/logs`)
 
 ### Configuration File
 Edit `src/config.py` to customize defaults:
