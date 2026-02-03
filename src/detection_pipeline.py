@@ -28,6 +28,97 @@ class DetectionPipeline:
         # Pipeline settings
         self.save_crops = True  # Default to saving crops
         self.enable_weapon_detection = enable_weapon_detection
+
+        # Optional filter to drop known background/irrelevant people from detections.
+        # This is useful when an unrelated person appears in the background and
+        # would otherwise pollute weapon metrics and distance RMSE.
+        #
+        # Config format (dict):
+        #   {
+        #     'enabled': bool,
+        #     'region': [x1, y1, x2, y2],   # normalized [0..1] image coords
+        #     'min_area_frac': float,       # min bbox area fraction to KEEP (drop smaller)
+        #     'max_area_frac': float,       # max bbox area fraction to KEEP (drop larger)
+        #   }
+        self.background_person_filter = {
+            'enabled': False,
+            'region': None,
+            'min_area_frac': None,
+            'max_area_frac': None,
+        }
+
+    def filter_people_detections(self, detections, image_shape, sample_name=None, frame_path=None):
+        """Filter out known background/irrelevant people based on bbox geometry.
+
+        The filtering happens before:
+        - crops are saved
+        - weapon detection runs
+        - metrics/statistics are updated
+        """
+        cfg = getattr(self, 'background_person_filter', None) or {}
+        if not cfg.get('enabled'):
+            return detections
+
+        if not detections:
+            return detections
+
+        h, w = image_shape[:2]
+        if h <= 0 or w <= 0:
+            return detections
+
+        region = cfg.get('region')
+        region_px = None
+        if region and len(region) == 4:
+            rx1, ry1, rx2, ry2 = region
+            # Clamp
+            rx1 = max(0.0, min(1.0, float(rx1)))
+            ry1 = max(0.0, min(1.0, float(ry1)))
+            rx2 = max(0.0, min(1.0, float(rx2)))
+            ry2 = max(0.0, min(1.0, float(ry2)))
+            if rx2 > rx1 and ry2 > ry1:
+                region_px = (rx1 * w, ry1 * h, rx2 * w, ry2 * h)
+
+        min_area = cfg.get('min_area_frac')
+        max_area = cfg.get('max_area_frac')
+        img_area = float(w * h)
+
+        def _inside_region(cx, cy, reg):
+            x1p, y1p, x2p, y2p = reg
+            return (cx >= x1p) and (cx <= x2p) and (cy >= y1p) and (cy <= y2p)
+
+        kept = []
+        for d in detections:
+            try:
+                x1, y1, x2, y2 = d.get('bbox') if isinstance(d, dict) else None
+            except Exception:
+                x1 = y1 = x2 = y2 = None
+
+            if x1 is None:
+                kept.append(d)
+                continue
+
+            bw = max(0.0, float(x2) - float(x1))
+            bh = max(0.0, float(y2) - float(y1))
+            area_frac = (bw * bh / img_area) if img_area > 0 else 0.0
+            cx = (float(x1) + float(x2)) / 2.0
+            cy = (float(y1) + float(y2)) / 2.0
+
+            drop = False
+
+            # Region-based filtering (common for background person walking on edge).
+            if region_px is not None and _inside_region(cx, cy, region_px):
+                drop = True
+
+            # Size-based filtering (background people are often much smaller).
+            if (min_area is not None) and (area_frac < float(min_area)):
+                drop = True
+            if (max_area is not None) and (area_frac > float(max_area)):
+                drop = True
+
+            if not drop:
+                kept.append(d)
+
+        return kept
     
     def extract_person_crops(self, image, detections_info):
         crops = []
@@ -275,6 +366,14 @@ class DetectionPipeline:
                 # Use detector to detect people
                 _, detections = self.detector.detect_people(image_path, draw_boxes=False)
 
+                # Optional: filter out known background people before any downstream steps.
+                detections = self.filter_people_detections(
+                    detections,
+                    original_image.shape,
+                    sample_name=dir_name,
+                    frame_path=image_path,
+                )
+
                 # Extract testing-time condition metadata from filenames (used for RMSE comparisons).
                 file_data = self.detector.extract_filename_metadata(image_path)
                 real_distance = file_data.get('distance_m')
@@ -314,22 +413,57 @@ class DetectionPipeline:
                 
                 cv2.imwrite(detection_path, combined_image)
                 
-                # Extract distances and (estimated, real) pairs from detections
-                distances = [d['distance_m'] for d in detections if 'distance_m' in d]
+                # Select CLOSEST detection (smallest distance)
+                best_detection = None
+                if detections:
+                    # Sort by distance (ascending) - closest first
+                    detections_with_distance = [d for d in detections if d.get('distance_m') is not None]
+                    if detections_with_distance:
+                        sorted_detections = sorted(
+                            detections_with_distance,
+                            key=lambda d: d.get('distance_m', float('inf'))
+                        )
+                        best_detection = sorted_detections[0]
+                    else:
+                        # Fallback: if no distance, use highest confidence
+                        best_detection = max(detections, key=lambda d: d.get('person_confidence', 0))
+                
+                # Extract distances and (estimated, real) pairs from BEST detection only
+                distances = []
                 distance_pairs = []
                 distance_pairs_pinhole = []
                 distance_pairs_pitch = []
-                if real_distance is not None:
-                    for d in detections:
-                        if 'distance_m' in d:
-                            distance_pairs.append((d['distance_m'], real_distance))
-                        if 'distance_pinhole_m' in d:
-                            distance_pairs_pinhole.append((d['distance_pinhole_m'], real_distance))
-                        if 'distance_pitch_m' in d:
-                            distance_pairs_pitch.append((d['distance_pitch_m'], real_distance))
+                
+                # Use only the best detection for metrics
+                num_people_for_metrics = 1 if best_detection else 0
+                weapons_detected_for_metrics = 0
+                people_with_weapons_for_metrics = 0
+                
+                if best_detection:
+                    if 'distance_m' in best_detection:
+                        distances.append(best_detection['distance_m'])
+                    
+                    if real_distance is not None:
+                        if 'distance_m' in best_detection:
+                            distance_pairs.append((best_detection['distance_m'], real_distance))
+                        if 'distance_pinhole_m' in best_detection:
+                            distance_pairs_pinhole.append((best_detection['distance_pinhole_m'], real_distance))
+                        if 'distance_pitch_m' in best_detection:
+                            distance_pairs_pitch.append((best_detection['distance_pitch_m'], real_distance))
+                    
+                    # Get weapon detection results for the best detection only
+                    if weapon_results and len(weapon_results) > 0:
+                        # Find the weapon result corresponding to the best detection
+                        best_idx = detections.index(best_detection)
+                        if best_idx < len(weapon_results):
+                            best_weapon_result = weapon_results[best_idx]
+                            if best_weapon_result.get('has_weapons', False):
+                                weapons_detected_for_metrics = len(best_weapon_result.get('weapon_detections', []))
+                                people_with_weapons_for_metrics = 1
+                
                 # Update statistics with ground truth from directory name
                 self.stats.add_image_results(
-                    len(detections), weapons_detected, people_with_weapons_count, has_weapons_ground_truth,
+                    num_people_for_metrics, weapons_detected_for_metrics, people_with_weapons_for_metrics, has_weapons_ground_truth,
                     distances, distance_pairs, real_distance, camera_height_annotated,
                     sample_class=sample_class,
                     camera_pitch_annotated_deg=camera_pitch_annotated_deg,

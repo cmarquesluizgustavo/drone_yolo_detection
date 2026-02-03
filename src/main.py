@@ -76,7 +76,7 @@ def main():
                        help='Confidence threshold for person detections')
     parser.add_argument('--weapon-confidence', type=float, default=0.5,
                        help='Confidence threshold for weapon detections')
-    parser.add_argument('--sample-majority-threshold', type=int, default=1,
+    parser.add_argument('--sample-majority-threshold', type=int, default=5,
                        help='Number of frames with weapon detections needed to classify sample as having weapons')
     parser.add_argument('--save-crops', action='store_true', default=True,
                        help='Save individual person crops (default: True)')

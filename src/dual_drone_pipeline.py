@@ -356,6 +356,20 @@ class DualDroneDetectionPipeline:
         # Detect people using current estimation methods
         detections1 = self.detect_people_with_estimation(img1, drone_id=1)
         detections2 = self.detect_people_with_estimation(img2, drone_id=2)
+
+        # Optional: filter known background people before crop/weapon detection and fusion.
+        detections1 = self.pipeline_drone1.filter_people_detections(
+            detections1,
+            img1.shape,
+            sample_name=sample_name,
+            frame_path=frame1_path,
+        )
+        detections2 = self.pipeline_drone2.filter_people_detections(
+            detections2,
+            img2.shape,
+            sample_name=sample_name,
+            frame_path=frame2_path,
+        )
         
         # Verbose output for detections
         if self.verbose or (frame_idx % 10 == 0):
@@ -434,9 +448,34 @@ class DualDroneDetectionPipeline:
         # Update stats for both individual detections and fused
         sample_class = (sample_meta.get('sample_class') if (sample_meta or {}).get('sample_class') in ('real', 'falso') else ('real' if has_weapons_gt else 'falso'))
 
-        # Distance evaluation pairs (method-specific)
-        distances1 = [d['distance_m'] for d in detections1 if d.get('distance_m') is not None]
-        distances2 = [d['distance_m'] for d in detections2 if d.get('distance_m') is not None]
+        # Select CLOSEST detection from each drone (smallest distance)
+        best_det1 = None
+        if detections1:
+            det1_with_dist = [d for d in detections1 if d.get('distance_m') is not None]
+            if det1_with_dist:
+                sorted_d1 = sorted(det1_with_dist, key=lambda d: d.get('distance_m', float('inf')))
+                best_det1 = sorted_d1[0]
+            else:
+                # Fallback: use highest confidence
+                best_det1 = max(detections1, key=lambda d: d.get('person_confidence', d.get('confidence', 0)))
+        
+        best_det2 = None
+        if detections2:
+            det2_with_dist = [d for d in detections2 if d.get('distance_m') is not None]
+            if det2_with_dist:
+                sorted_d2 = sorted(det2_with_dist, key=lambda d: d.get('distance_m', float('inf')))
+                best_det2 = sorted_d2[0]
+            else:
+                # Fallback: use highest confidence
+                best_det2 = max(detections2, key=lambda d: d.get('person_confidence', d.get('confidence', 0)))
+        
+        # Distance evaluation pairs (method-specific) - ONLY BEST DETECTION
+        distances1 = []
+        distances2 = []
+        if best_det1 and best_det1.get('distance_m') is not None:
+            distances1.append(best_det1['distance_m'])
+        if best_det2 and best_det2.get('distance_m') is not None:
+            distances2.append(best_det2['distance_m'])
 
         pairs1_p = []
         pairs1_pitch = []
@@ -446,25 +485,42 @@ class DualDroneDetectionPipeline:
         pairs2_primary = []
 
         if real_distance is not None:
-            for d in detections1:
-                if d.get('distance_m') is not None:
-                    pairs1_primary.append((d['distance_m'], real_distance))
-                if d.get('distance_pinhole_m') is not None:
-                    pairs1_p.append((d['distance_pinhole_m'], real_distance))
-                if d.get('distance_pitch_m') is not None:
-                    pairs1_pitch.append((d['distance_pitch_m'], real_distance))
-            for d in detections2:
-                if d.get('distance_m') is not None:
-                    pairs2_primary.append((d['distance_m'], real_distance))
-                if d.get('distance_pinhole_m') is not None:
-                    pairs2_p.append((d['distance_pinhole_m'], real_distance))
-                if d.get('distance_pitch_m') is not None:
-                    pairs2_pitch.append((d['distance_pitch_m'], real_distance))
+            if best_det1:
+                if best_det1.get('distance_m') is not None:
+                    pairs1_primary.append((best_det1['distance_m'], real_distance))
+                if best_det1.get('distance_pinhole_m') is not None:
+                    pairs1_p.append((best_det1['distance_pinhole_m'], real_distance))
+                if best_det1.get('distance_pitch_m') is not None:
+                    pairs1_pitch.append((best_det1['distance_pitch_m'], real_distance))
+            if best_det2:
+                if best_det2.get('distance_m') is not None:
+                    pairs2_primary.append((best_det2['distance_m'], real_distance))
+                if best_det2.get('distance_pinhole_m') is not None:
+                    pairs2_p.append((best_det2['distance_pinhole_m'], real_distance))
+                if best_det2.get('distance_pitch_m') is not None:
+                    pairs2_pitch.append((best_det2['distance_pitch_m'], real_distance))
         
-        # Individual drone stats
+        # Weapon detection for best detection only
+        weapons_detected_d1_best = 0
+        people_with_weapons_d1 = 0
+        if best_det1 and weapon_results1:
+            best_idx1 = detections1.index(best_det1)
+            if best_idx1 < len(weapon_results1) and weapon_results1[best_idx1].get('has_weapons', False):
+                weapons_detected_d1_best = len(weapon_results1[best_idx1].get('weapon_detections', []))
+                people_with_weapons_d1 = 1
+        
+        weapons_detected_d2_best = 0
+        people_with_weapons_d2 = 0
+        if best_det2 and weapon_results2:
+            best_idx2 = detections2.index(best_det2)
+            if best_idx2 < len(weapon_results2) and weapon_results2[best_idx2].get('has_weapons', False):
+                weapons_detected_d2_best = len(weapon_results2[best_idx2].get('weapon_detections', []))
+                people_with_weapons_d2 = 1
+        
+        # Individual drone stats (using only best detection)
         self.stats_drone1.add_image_results(
-            len(detections1), weapons_detected_d1, 
-            len([r for r in weapon_results1 if r.get('has_weapons', False)]),
+            1 if best_det1 else 0, weapons_detected_d1_best, 
+            people_with_weapons_d1,
             has_weapons_gt,
             distances=distances1,
             distance_pairs=pairs1_primary,
@@ -476,8 +532,8 @@ class DualDroneDetectionPipeline:
         )
         
         self.stats_drone2.add_image_results(
-            len(detections2), weapons_detected_d2,
-            len([r for r in weapon_results2 if r.get('has_weapons', False)]),
+            1 if best_det2 else 0, weapons_detected_d2_best,
+            people_with_weapons_d2,
             has_weapons_gt,
             distances=distances2,
             distance_pairs=pairs2_primary,
