@@ -4,13 +4,9 @@ from pathlib import Path
 from people_detector import PeopleDetector
 from detection_statistics import DetectionStatistics
 
-try:
-    from config import *
-except ImportError:
-    # Default configuration if config.py is not found
-    SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.bmp']
-    CROP_MIN_SIZE = 32
-
+# File format and processing constants
+SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.bmp']
+CROP_MIN_SIZE = 32
 
 class DetectionPipeline:
     """Pipeline for batch processing images with people and weapon detection."""

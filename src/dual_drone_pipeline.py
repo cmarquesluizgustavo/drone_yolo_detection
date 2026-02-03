@@ -17,9 +17,9 @@ class DualDroneDetectionPipeline:
 
     def __init__(self, model_path: str, person_confidence_threshold: float,
                  enable_weapon_detection: bool = True,
-                 weapon_confidence_threshold: float = 0.7,
+                 weapon_confidence_threshold: float = 0.5,
                  sample_majority_threshold: int = 1,
-                 association_threshold: float = 2.0):  # distance threshold for cross-drone detection matching (meters)
+                 association_threshold: float = 100.0):  # distance threshold for cross-drone detection matching (meters)
 
         # Create two independent detection pipelines (one per drone)
         self.pipeline_drone1 = DetectionPipeline(
@@ -252,7 +252,8 @@ class DualDroneDetectionPipeline:
             s.finalize()
 
     def process_synchronized_sample_pair(self, sample_dir_drone1, sample_dir_drone2, output_base, sample_name, detections_base, crops_base, fused_base):
-        from config import SUPPORTED_FORMATS
+        # Supported image formats
+        SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.bmp']
         
         def get_image_files(directory):
             return sorted([

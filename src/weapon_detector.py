@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 
 class WeaponDetector:
-    def __init__(self, model_path: str = None, weapon_confidence_threshold: float = 0.7):
+    def __init__(self, model_path: str = None, weapon_confidence_threshold: float = 0.5):
         if model_path is None:
             current_dir = Path(__file__).parent
             model_path = current_dir.parent / "models" / "weapons" / "best.pt"

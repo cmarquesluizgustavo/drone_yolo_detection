@@ -93,7 +93,7 @@ def main():
     parser.add_argument('--input-drone2', default='inputs/samples/drone2',
                        help='Input directory for drone 2 (dual-drone mode)')
     parser.add_argument('--association-threshold', type=float, default=100.0,
-                       help='Distance threshold (meters) for associating detections across drones (default: 2.0)')
+                       help='Distance threshold (meters) for associating detections across drones (default: 100.0)')
 
     parser.add_argument('--log-level', default='INFO',
                         help='Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)')

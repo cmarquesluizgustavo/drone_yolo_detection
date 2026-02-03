@@ -6,18 +6,14 @@ from camera import Camera
 
 from position_estimation import estimate_distance, estimate_distance_pitch, estimate_bearing
 
-
-try:
-    from config import *
-except ImportError:
-    # Default configuration if config.py is not found
-    PERSON_CLASS_ID = 0
-    BOX_COLOR = (0, 255, 0)
-    BOX_THICKNESS = 2
-    FONT_SCALE = 0.5
-    FONT_THICKNESS = 2
-    CROP_PADDING = 0.1
-    CROP_MIN_SIZE = 32
+# Detection and visualization constants
+PERSON_CLASS_ID = 0  # COCO class ID for 'person'
+BOX_COLOR = (0, 255, 0)  # Green bounding boxes (BGR format)
+BOX_THICKNESS = 2
+FONT_SCALE = 0.5
+FONT_THICKNESS = 2
+CROP_PADDING = 0.1  # 10% padding around bounding boxes
+CROP_MIN_SIZE = 32  # Minimum crop size in pixels
 
 try:
     from weapon_detector import WeaponDetector
@@ -30,8 +26,8 @@ except ImportError as e:
 class PeopleDetector:
     """Core detector class for person and weapon detection in single images."""
     
-    def __init__(self, model_path: str, person_confidence_threshold: float = 0.4, 
-                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.2):
+    def __init__(self, model_path: str, person_confidence_threshold: float = 0.5, 
+                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.5):
         self.logger = logging.getLogger(__name__)
         self.model = YOLO(model_path)
         self.person_confidence_threshold = person_confidence_threshold
