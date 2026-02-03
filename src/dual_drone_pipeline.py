@@ -6,6 +6,11 @@ from detection_pipeline import DetectionPipeline
 from detection_fusion import DualDroneFusion, Detection
 from camera import Camera
 from detection_statistics import DetectionStatistics
+from position_estimation import (
+    estimate_distance_pitch, estimate_bearing, estimate_distance,
+    target_geoposition, distance_from_geoposition
+)
+from geoconverter import GeoConverter
 
 class DualDroneDetectionPipeline:
     """Pipeline for processing synchronized video streams from two drones."""
@@ -49,11 +54,10 @@ class DualDroneDetectionPipeline:
         self.save_crops = True
         self.enable_weapon_detection = enable_weapon_detection
         self.person_confidence_threshold = person_confidence_threshold
-        self.verbose = False  # set True to print per-frame debug output
+        self.verbose = True  # set True to print per-frame debug output
 
     def print_console_output(self, detections1, detections2, fused_detections, weapon_results1=None, weapon_results2=None):
         """Print console output with detection information."""
-        from position_estimation import distance_from_position
         
         # Select best detections
         best1 = detections1[0] if detections1 else None
@@ -69,8 +73,8 @@ class DualDroneDetectionPipeline:
         geo2 = best2.get('person_geoposition') if best2 else None
 
         geo_fused = best_fused.get('fused_geoposition') if best_fused else None
-        d1_fused = distance_from_position(self.camera_drone1, geo_fused['latitude'], geo_fused['longitude']) if geo_fused else None
-        d2_fused = distance_from_position(self.camera_drone2, geo_fused['latitude'], geo_fused['longitude']) if geo_fused else None
+        d1_fused = distance_from_geoposition(self.camera_drone1, geo_fused['latitude'], geo_fused['longitude']) if geo_fused else None
+        d2_fused = distance_from_geoposition(self.camera_drone2, geo_fused['latitude'], geo_fused['longitude']) if geo_fused else None
 
         c1 = best1.get('person_confidence') if best1 else None
         c2 = best2.get('person_confidence') if best2 else None
@@ -123,37 +127,10 @@ class DualDroneDetectionPipeline:
         )
     
     def add_fused_geopositions(self, fused_detections, detections1, detections2):
-        """Add triangulated geopositions to fused detections."""
-        from position_estimation import fuse_target_geoposition
-        
-        for fused_det in fused_detections:
-            if fused_det.get('source') == 'fused':
-                # Find the original detections from both drones
-                bbox1 = fused_det.get('bbox_drone1')
-                bbox2 = fused_det.get('bbox_drone2')
-                
-                if bbox1 is None or bbox2 is None:
-                    continue
-                
-                det1 = next((d for d in detections1 if tuple(d['bbox']) == tuple(bbox1)), None)
-                det2 = next((d for d in detections2 if tuple(d['bbox']) == tuple(bbox2)), None)
-                
-                if det1 and det2:
-                    dist1 = det1.get('distance_m')
-                    bearing1 = det1.get('bearing_deg')
-                    dist2 = det2.get('distance_m')
-                    bearing2 = det2.get('bearing_deg')
-                    
-                    if all(v is not None for v in [dist1, bearing1, dist2, bearing2]):
-                        # Triangulate fused position
-                        fused_lat, fused_lon = fuse_target_geoposition(
-                            self.camera_drone1, dist1, bearing1,
-                            self.camera_drone2, dist2, bearing2
-                        )
-                        fused_det['fused_geoposition'] = {
-                            'latitude': fused_lat,
-                            'longitude': fused_lon
-                        }
+        """Legacy method - geopositions are now added by direct triangulation in fuse_frame_detections."""
+        # This method is kept for backward compatibility but is no longer used
+        # Direct triangulation handles all position estimation
+        pass
         
     def process_dual_drone_samples(self, input_dir_drone1, input_dir_drone2, output_base_dir):
         # Check if directories contain angle subdirectories
@@ -232,7 +209,9 @@ class DualDroneDetectionPipeline:
         
         # Process each synchronized pair
         for sample_idx, sample_name in enumerate(sample_pairs, 1):
+            print(f"\n{'='*60}")
             print(f"Processing sample {sample_idx}/{len(sample_pairs)}: {sample_name}")
+            print(f"{'='*60}")
             
             # Get paths
             sample_path_drone1 = os.path.join(input_dir_drone1, sample_name)
@@ -250,6 +229,8 @@ class DualDroneDetectionPipeline:
             else:
                 sample_ground_truth = sample_name.lower().startswith("real")
                 sample_class = 'real' if sample_name.lower().startswith('real') else 'falso'
+            
+            print(f"  Sample type: {sample_class.upper()} (has_weapons={sample_ground_truth})")
             
             # Mark start of new sample
             for s in (self.stats_drone1, self.stats_drone2, self.stats_fused):
@@ -282,10 +263,15 @@ class DualDroneDetectionPipeline:
         
         images_drone1 = get_image_files(sample_dir_drone1)
         images_drone2 = get_image_files(sample_dir_drone2)
+        
+        print(f"  Drone 1: {len(images_drone1)} frames")
+        print(f"  Drone 2: {len(images_drone2)} frames")
 
         synchronized_pairs = self.synchronize_by_frame_index(
             images_drone1, images_drone2
         )
+        
+        print(f"  Synchronized: {len(synchronized_pairs)} frame pairs")
         
         sample_det_d1 = os.path.join(detections_base, f"{sample_name}_drone1")
         sample_det_d2 = os.path.join(detections_base, f"{sample_name}_drone2")
@@ -299,12 +285,16 @@ class DualDroneDetectionPipeline:
         
         # Process each synchronized frame pair
         for frame_idx, (frame1_path, frame2_path) in enumerate(synchronized_pairs):
+            if frame_idx % 10 == 0:  # Print progress every 10 frames
+                print(f"    Processing frame {frame_idx + 1}/{len(synchronized_pairs)}")
             self.process_frame_pair(
                 frame1_path, frame2_path, frame_idx,
                 sample_det_d1, sample_det_d2, sample_det_fused,
                 sample_crops_d1, sample_crops_d2,
                 sample_name
             )
+        
+        print(f"  ✓ Completed all {len(synchronized_pairs)} frames")
     
     @staticmethod
     def synchronize_by_frame_index(frames1, frames2):
@@ -336,9 +326,19 @@ class DualDroneDetectionPipeline:
         img1 = cv2.imread(frame1_path)
         img2 = cv2.imread(frame2_path)
         
+        if img1 is None or img2 is None:
+            print(f"    ⚠ Warning: Failed to load frame {frame_idx}")
+            return
+        
         # Load telemetry data for both cameras from txt files
         self.camera_drone1.load_telemetry_from_video_path(frame1_path)
         self.camera_drone2.load_telemetry_from_video_path(frame2_path)
+        
+        # Debug: Print drone positions on first frame
+        if frame_idx == 0:
+            print(f"  DEBUG Drone positions:")
+            print(f"    Drone 1: lat={self.camera_drone1.lat:.6f}, lon={self.camera_drone1.lon:.6f}, yaw={self.camera_drone1.yaw_deg:.1f}°")
+            print(f"    Drone 2: lat={self.camera_drone2.lat:.6f}, lon={self.camera_drone2.lon:.6f}, yaw={self.camera_drone2.yaw_deg:.1f}°")
         
         # Extract height from filename metadata
         frame_meta = self.pipeline_drone1.detector.extract_filename_metadata(frame1_path)
@@ -353,8 +353,12 @@ class DualDroneDetectionPipeline:
         name2, ext2 = os.path.splitext(filename2)
         
         # Detect people using current estimation methods
-        detections1 = self.detect_people_with_estimation(frame1_path, img1, drone_id=1)
-        detections2 = self.detect_people_with_estimation(frame2_path, img2, drone_id=2)
+        detections1 = self.detect_people_with_estimation(img1, drone_id=1)
+        detections2 = self.detect_people_with_estimation(img2, drone_id=2)
+        
+        # Verbose output for detections
+        if self.verbose or (frame_idx % 10 == 0):
+            print(f"      Frame {frame_idx}: D1={len(detections1)} people, D2={len(detections2)} people")
         
         # Testing-time condition metadata (used for RMSE comparisons only)
         real_distance = frame_meta.get('distance_m')
@@ -382,13 +386,15 @@ class DualDroneDetectionPipeline:
         fused_detections = self.fuse_frame_detections(
             detections1, detections2, weapon_results1, weapon_results2, frame_idx
         )
+        
+        # Verbose output for fusion
+        if self.verbose or (frame_idx % 10 == 0):
+            fused_count = len([d for d in fused_detections if d.get('source') == 'fused'])
+            print(f"      Frame {frame_idx}: Fused {fused_count} detections from both drones, total {len(fused_detections)} detections")
 
         # Print console output if needed
         if getattr(self, 'verbose', False):
             self.print_console_output(detections1, detections2, fused_detections, weapon_results1, weapon_results2)
-
-        # Attach triangulated fused geoposition if implemented
-        self.add_fused_geopositions(fused_detections, detections1, detections2)
 
         # Draw detections on individual frames
         img1_annotated = self.draw_boxes_fusion(img1, detections1, weapon_results1, "Drone 1")
@@ -484,7 +490,6 @@ class DualDroneDetectionPipeline:
         # Fused-distance RMSE pairs: derive per-drone distance to fused geoposition.
         fused_pairs = []
         if real_distance is not None:
-            from position_estimation import distance_from_position
             for d in fused_detections:
                 if d.get('source') != 'fused':
                     continue
@@ -496,8 +501,8 @@ class DualDroneDetectionPipeline:
                 if lat is None or lon is None:
                     continue
                 try:
-                    dist1_f = distance_from_position(self.camera_drone1, float(lat), float(lon))
-                    dist2_f = distance_from_position(self.camera_drone2, float(lat), float(lon))
+                    dist1_f = distance_from_geoposition(self.camera_drone1, float(lat), float(lon))
+                    dist2_f = distance_from_geoposition(self.camera_drone2, float(lat), float(lon))
                 except Exception:
                     continue
                 fused_pairs.append((dist1_f, real_distance))
@@ -568,9 +573,7 @@ class DualDroneDetectionPipeline:
         return img_annotated
     
     def fuse_frame_detections(self, detections1, detections2, weapon_results1, weapon_results2, frame_idx):
-        """Fuse detections from two drones using geoposition-based matching."""
-        from geoconverter import GeoConverter
-        from position_estimation import fuse_target_geoposition
+        """Fuse detections from two drones using direct geometric triangulation."""
         
         # Convert to Detection objects for fusion
         detection_objs1 = []
@@ -589,7 +592,6 @@ class DualDroneDetectionPipeline:
             person_lon = person_geo.get('longitude') if isinstance(person_geo, dict) else None
 
             # Convert to ground-plane coordinates for matching.
-            # If no valid geoposition, mark as NaN so fusion won't associate it.
             if person_lat is None or person_lon is None:
                 x, y = float('nan'), float('nan')
                 person_lat = 0.0
@@ -650,37 +652,129 @@ class DualDroneDetectionPipeline:
                 weapon_confidence=weapon_conf
             ))
         
-        # Perform fusion using geoposition-based matching
-        fused = self.fusion.match_detections(detection_objs1, detection_objs2)
+        # Prepare measurements for direct triangulation
+        measurement_groups = self.fusion.prepare_measurements_for_triangulation(
+            detection_objs1, detection_objs2, self.camera_drone1, self.camera_drone2
+        )
         
-        # Add fused geopositions using triangulation
-        for fused_det in fused:
-            if fused_det.get('source') == 'fused':
-                # Find the original detections from both drones
-                bbox1 = fused_det.get('bbox_drone1')
-                bbox2 = fused_det.get('bbox_drone2')
-                
-                det1 = next((d for d in detections1 if tuple(d['bbox']) == bbox1), None)
-                det2 = next((d for d in detections2 if tuple(d['bbox']) == bbox2), None)
-                
-                if det1 and det2:
-                    dist1 = det1.get('distance_m')
-                    bearing1 = det1.get('bearing_deg')
-                    dist2 = det2.get('distance_m')
-                    bearing2 = det2.get('bearing_deg')
-                    
-                    if all(v is not None for v in [dist1, bearing1, dist2, bearing2]):
-                        # Triangulate fused position
-                        fused_lat, fused_lon = fuse_target_geoposition(
-                            self.camera_drone1, dist1, bearing1,
-                            self.camera_drone2, dist2, bearing2
-                        )
-                        fused_det['fused_geoposition'] = {
-                            'latitude': fused_lat,
-                            'longitude': fused_lon
-                        }
+        # Use direct geometric triangulation (no temporal filtering)
+        fused_detections = self._direct_triangulation(measurement_groups)
+        
+        # Convert triangulation results to detection format
+        fused = []
+        for detection in fused_detections:
+            # Get triangulated position
+            x, y = detection['x'], detection['y']
+            
+            # Convert back to geographic coordinates
+            lat, lon = GeoConverter.xy_to_geo(x, y)
+            
+            # Determine source and bbox info
+            source = 'fused' if len(detection['drone_measurements']) > 1 else f"drone{detection.get('drone_id', 1)}"
+            
+            fused_det = {
+                'source': source,
+                'person_confidence': detection['person_confidence'],
+                'has_weapon': detection['has_weapon'],
+                'weapon_confidence': detection['weapon_confidence'],
+                'fused_geoposition': {
+                    'latitude': lat,
+                    'longitude': lon
+                },
+                'x': x,
+                'y': y,
+                'detection_id': detection['detection_id'],
+            }
+            
+            # Add bounding box information
+            if source == 'fused':
+                fused_det['bbox_drone1'] = detection.get('bbox_drone1')
+                fused_det['bbox_drone2'] = detection.get('bbox_drone2')
+            else:
+                bbox_key = f'bbox_drone{detection.get("drone_id", 1)}'
+                fused_det['bbox'] = detection.get(bbox_key)
+            
+            # Calculate distance and bearing from each drone to fused position
+            for cam_id, camera in [(1, self.camera_drone1), (2, self.camera_drone2)]:
+                try:
+                    dist = distance_from_geoposition(camera, lat, lon)
+                    fused_det[f'distance_drone{cam_id}_m'] = dist
+                except Exception:
+                    pass
+            
+            fused.append(fused_det)
         
         return fused
+    
+    def _direct_triangulation(self, measurement_groups):
+        """
+        Perform direct geometric triangulation for each frame independently.
+        No temporal filtering - treats each frame as independent.
+        """
+        import math
+        
+        fused_detections = []
+        for det_id, group in enumerate(measurement_groups):
+            measurements = group['drone_measurements']
+            
+            if len(measurements) == 1:
+                # Single drone measurement - use bearing line estimate
+                m = measurements[0]
+                bearing_rad = math.radians(m['bearing'])
+                x = m['uav_pos'][0] + m['distance'] * math.sin(bearing_rad)
+                y = m['uav_pos'][1] + m['distance'] * math.cos(bearing_rad)
+                drone_id = group.get('drone_id', 1)
+            elif len(measurements) >= 2:
+                # Dual drone measurement - triangulate bearing line intersection
+                m1, m2 = measurements[0], measurements[1]
+                x1, y1 = m1['uav_pos']
+                x2, y2 = m2['uav_pos']
+                b1 = math.radians(m1['bearing'])
+                b2 = math.radians(m2['bearing'])
+                
+                # Direction vectors
+                dx1 = math.sin(b1)
+                dy1 = math.cos(b1)
+                dx2 = math.sin(b2)
+                dy2 = math.cos(b2)
+                
+                # Check if parallel
+                cross = dx1 * dy2 - dy1 * dx2
+                if abs(cross) < 1e-6:
+                    # Parallel - use weighted midpoint
+                    r1, r2 = m1['distance'], m2['distance']
+                    w1 = 1.0 / max(r1, 0.1)
+                    w2 = 1.0 / max(r2, 0.1)
+                    x1_est = x1 + r1 * dx1
+                    y1_est = y1 + r1 * dy1
+                    x2_est = x2 + r2 * dx2
+                    y2_est = y2 + r2 * dy2
+                    x = (x1_est * w1 + x2_est * w2) / (w1 + w2)
+                    y = (y1_est * w1 + y2_est * w2) / (w1 + w2)
+                else:
+                    # Intersect bearing lines
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    t1 = (dx * dy2 - dy * dx2) / cross
+                    x = x1 + t1 * dx1
+                    y = y1 + t1 * dy1
+                
+                drone_id = None  # Fused from multiple drones
+            
+            fused_detections.append({
+                'x': x,
+                'y': y,
+                'detection_id': det_id + 1,
+                'person_confidence': group['person_confidence'],
+                'has_weapon': group['has_weapon'],
+                'weapon_confidence': group['weapon_confidence'],
+                'bbox_drone1': group.get('bbox_drone1'),
+                'bbox_drone2': group.get('bbox_drone2'),
+                'drone_id': drone_id,
+                'drone_measurements': measurements
+            })
+        
+        return fused_detections
 
     def fused_visualization(self, img1, img2, fused_detections, detections1=None, detections2=None):
         h1, w1 = img1.shape[:2]
@@ -776,13 +870,12 @@ class DualDroneDetectionPipeline:
         
         return combined
 
-    def detect_people_with_estimation(self, image_path, image, drone_id):
+    def detect_people_with_estimation(self, image, drone_id):
         """Detect people and estimate their distance/bearing/geoposition for fusion."""
-        from position_estimation import estimate_distance, estimate_distance_2, estimate_bearing, simple_target_geoposition
         
         detector = self.pipeline_drone1.detector if drone_id == 1 else self.pipeline_drone2.detector
         camera = self.camera_drone1 if drone_id == 1 else self.camera_drone2
-        
+    
         # Run detection
         results = detector.model(
             image,
@@ -801,7 +894,7 @@ class DualDroneDetectionPipeline:
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                     confidence = float(box.conf[0].cpu().numpy())
                     class_id = int(box.cls[0].cpu().numpy())
-                    
+                       
                     if class_id == 0 and confidence >= self.person_confidence_threshold:
                         person_height_px = float(y2 - y1)
                         y_bottom = float(y2)
@@ -813,7 +906,7 @@ class DualDroneDetectionPipeline:
                         distance_pitch_m = None
                         if camera.height_m > 0:
                             try:
-                                distance_pitch_m = estimate_distance_2(camera, y_bottom)
+                                distance_pitch_m = estimate_distance_pitch(camera, y_bottom)
                             except (ZeroDivisionError, ValueError, TypeError):
                                 distance_pitch_m = None
 
@@ -830,11 +923,11 @@ class DualDroneDetectionPipeline:
                         # Calculate geoposition of detected person (when telemetry lat/lon is available).
                         person_lat_pinhole, person_lon_pinhole = None, None
                         if distance_pinhole_m is not None and bearing_deg is not None and camera.lat != 0 and camera.lon != 0:
-                            person_lat_pinhole, person_lon_pinhole = simple_target_geoposition(camera, float(distance_pinhole_m), float(bearing_deg))
+                            person_lat_pinhole, person_lon_pinhole = target_geoposition(camera, float(distance_pinhole_m), float(bearing_deg))
 
                         person_lat_pitch, person_lon_pitch = None, None
                         if distance_pitch_m is not None and bearing_deg is not None and camera.lat != 0 and camera.lon != 0:
-                            person_lat_pitch, person_lon_pitch = simple_target_geoposition(camera, float(distance_pitch_m), float(bearing_deg))
+                            person_lat_pitch, person_lon_pitch = target_geoposition(camera, float(distance_pitch_m), float(bearing_deg))
 
                         # A single geoposition used for matching (prefer pitch-based when available).
                         person_geoposition = None

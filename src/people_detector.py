@@ -4,7 +4,7 @@ import logging
 from ultralytics import YOLO
 from camera import Camera
 
-from position_estimation import estimate_distance, estimate_distance_2, estimate_bearing, distance_from_position
+from position_estimation import estimate_distance, estimate_distance_pitch, estimate_bearing
 
 
 try:
@@ -59,16 +59,6 @@ class PeopleDetector:
         self.camera = None
         try:
             self.camera = Camera()  # Using default drone camera settings
-            self.distance_logger = logging.getLogger('distance_logger')
-            self.distance_logger.setLevel(logging.INFO)
-            
-            if not self.distance_logger.handlers:
-                log_file = 'person_distances.log'
-                file_handler = logging.FileHandler(log_file)
-                file_handler.setLevel(logging.INFO)
-                formatter = logging.Formatter('%(asctime)s - %(message)s')
-                file_handler.setFormatter(formatter)
-                self.distance_logger.addHandler(file_handler)
         except Exception as e:
             self.logger.warning("Failed to initialize distance estimation: %s", e)
 
@@ -132,7 +122,6 @@ class PeopleDetector:
                         distance_pitch_m = None
                         bearing_deg = None
                         if self.camera:
-                            from position_estimation import estimate_distance, estimate_distance_2, estimate_bearing
                             try:
                                 image_name = os.path.basename(image_path)
                                 # Get annotated values from filename ONLY
@@ -146,7 +135,7 @@ class PeopleDetector:
 
                                 if self.camera.pitch_deg is not None:
                                     y_bottom = y2
-                                    distance_pitch_m = estimate_distance_2(self.camera, y_bottom)
+                                    distance_pitch_m = estimate_distance_pitch(self.camera, y_bottom)
 
                                 if self.camera.yaw_deg is not None:
                                     x_center = float((x1 + x2) / 2)
@@ -252,7 +241,7 @@ class PeopleDetector:
                             # Update camera with annotated values
                             camera.height_m = cam_height_m
                             camera.pitch_deg = cam_pitch_deg
-                            distance_pitch_m = estimate_distance_2(camera, y_bottom)
+                            distance_pitch_m = estimate_distance_pitch(camera, y_bottom)
 
                         # Choose primary distance for downstream use
                         if distance_pitch_m is not None:

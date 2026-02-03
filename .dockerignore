@@ -54,7 +54,3 @@ inputs/clips/
 tmp/
 temp/
 *.tmp
-
-# Logs
-*.log
-logs/

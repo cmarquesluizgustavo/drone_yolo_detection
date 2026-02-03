@@ -25,46 +25,6 @@ def _parse_log_level(level: str) -> int:
     level_name = str(level).upper().strip()
     return getattr(logging, level_name, logging.INFO)
 
-
-def setup_logging(log_dir: Path, log_level: int) -> Path:
-    """Configure root logger to log to console and a rotating file."""
-    log_dir.mkdir(parents=True, exist_ok=True)
-    log_path = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-
-    root_logger = logging.getLogger()
-    for handler in list(root_logger.handlers):
-        root_logger.removeHandler(handler)
-
-    root_logger.setLevel(log_level)
-
-    formatter = logging.Formatter(
-        fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(log_level)
-    console_handler.setFormatter(formatter)
-
-    file_handler = logging.handlers.RotatingFileHandler(
-        log_path,
-        maxBytes=10 * 1024 * 1024,
-        backupCount=5,
-        encoding="utf-8",
-    )
-    file_handler.setLevel(log_level)
-    file_handler.setFormatter(formatter)
-
-    root_logger.addHandler(console_handler)
-    root_logger.addHandler(file_handler)
-
-    # Keep third-party libraries from being overly chatty by default.
-    logging.getLogger("ultralytics").setLevel(max(log_level, logging.WARNING))
-
-    root_logger.info("Logging initialized: level=%s file=%s", logging.getLevelName(log_level), log_path)
-    return log_path
-
-
 class _TeeTextIO(io.TextIOBase):
     """Write text to two streams (e.g., console + file)."""
 
@@ -101,8 +61,8 @@ def _tee_console_to_file(console_path: Path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Detect people in images using YOLOv26n')
-    parser.add_argument('--model', default='models/people/yolo26n.pt', 
+    parser = argparse.ArgumentParser(description='Detect people in images using YOLO11n')
+    parser.add_argument('--model', default='models/people/yolo11n.pt', 
                        help='Path to YOLO model file for people detection')
     parser.add_argument('--input', default='inputs/samples', 
                        help='Input directory containing sample folders')
@@ -145,10 +105,9 @@ def main():
     # Configure logging early so constructor logs are captured.
     log_level = _parse_log_level(args.log_level)
     log_dir = Path(args.log_dir) if args.log_dir else (Path(args.output) / "logs")
-    log_path = setup_logging(log_dir=log_dir, log_level=log_level)
 
     # Also capture any print-based console output directly to a file.
-    console_log_path = log_path.with_name(f"{log_path.stem}_console.log")
+    console_log_path = log_dir / f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_console.log"
     restore_console, console_fh = _tee_console_to_file(console_log_path)
     
     try:

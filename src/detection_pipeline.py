@@ -18,16 +18,6 @@ class DetectionPipeline:
     def __init__(self, model_path: str, person_confidence_threshold: float = 0.5, 
                  enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.5, 
                  sample_majority_threshold: int = 1):
-        """
-        Initialize the detection pipeline.
-        
-        Args:
-            model_path: Path to the YOLO model file
-            person_confidence_threshold: Minimum confidence for person detections
-            enable_weapon_detection: Whether to enable weapon detection on person crops
-            weapon_confidence_threshold: Minimum confidence for weapon detections
-            sample_majority_threshold: Number of frames with weapons needed to classify sample as having weapons
-        """
         # Initialize the core detector
         self.detector = PeopleDetector(
             model_path=model_path,
