@@ -95,6 +95,9 @@ def main():
     parser.add_argument('--association-threshold', type=float, default=100.0,
                        help='Distance threshold (meters) for associating detections across drones (default: 100.0)')
 
+    parser.add_argument('--show-weapon-confidence', action='store_true',
+                        help='Show weapon confidence text in overlays (default: False)')
+
     parser.add_argument('--log-level', default='INFO',
                         help='Logging level: DEBUG, INFO, WARNING, ERROR (default: INFO)')
     parser.add_argument('--log-dir', default='logs/',
@@ -170,6 +173,9 @@ def main():
             
             # Set crop saving preference
             pipeline.save_crops = save_crops
+            pipeline.show_weapon_confidence = bool(args.show_weapon_confidence)
+            pipeline.pipeline_drone1.show_weapon_confidence = bool(args.show_weapon_confidence)
+            pipeline.pipeline_drone2.show_weapon_confidence = bool(args.show_weapon_confidence)
             
             # Process dual-drone samples
             pipeline.process_dual_drone_samples(
@@ -201,6 +207,7 @@ def main():
         
         # Set crop saving preference
         pipeline.save_crops = save_crops
+        pipeline.show_weapon_confidence = bool(args.show_weapon_confidence)
         
         # Process all sample directories
         # Check if input is a single directory with images or a parent directory with subdirectories

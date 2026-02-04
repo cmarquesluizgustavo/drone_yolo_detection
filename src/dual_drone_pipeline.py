@@ -11,6 +11,7 @@ from position_estimation import (
     target_geoposition, distance_from_geoposition
 )
 from geoconverter import GeoConverter
+import viewer
 
 class DualDroneDetectionPipeline:
     """Pipeline for processing synchronized video streams from two drones."""
@@ -55,6 +56,7 @@ class DualDroneDetectionPipeline:
         self.enable_weapon_detection = enable_weapon_detection
         self.person_confidence_threshold = person_confidence_threshold
         self.verbose = True  # set True to print per-frame debug output
+        self.show_weapon_confidence = False
 
     def print_console_output(self, detections1, detections2, fused_detections, weapon_results1=None, weapon_results2=None):
         """Print console output with detection information."""
@@ -583,50 +585,12 @@ class DualDroneDetectionPipeline:
           # No console logging
     
     def draw_boxes_fusion(self, image, detections, weapon_results, drone_label):
-        img_annotated = image.copy()
-        
-        for i, det in enumerate(detections):
-            x1, y1, x2, y2 = det['bbox']
-            confidence = det['confidence']
-            distance_m = det.get('distance_m')
-            dist_p = det.get('distance_pinhole_m')
-            dist_t = det.get('distance_pitch_m')
-            
-            # Check weapon detection
-            has_weapon = False
-            weapon_conf = 0.0
-            if i < len(weapon_results):
-                has_weapon = weapon_results[i].get('has_weapons', False)
-                if has_weapon and weapon_results[i].get('weapon_detections'):
-                    weapon_conf = max([w.get('weapon_confidence', w.get('confidence', 0.0)) for w in weapon_results[i]['weapon_detections']])
-            
-            # Choose color based on weapon detection
-            color = (0, 0, 255) if has_weapon else (0, 255, 0)  # Red if weapon, Green otherwise
-            
-            # Draw bounding box
-            cv2.rectangle(img_annotated, (x1, y1), (x2, y2), color, 2)
-            
-            # Create label
-            label = f"Person: {confidence:.2f}"
-            # Show both distance estimates when available for easy comparison.
-            if dist_p is not None or dist_t is not None:
-                if dist_p is not None:
-                    label += f" P:{dist_p:.1f}m"
-                if dist_t is not None:
-                    label += f" Pitch:{dist_t:.1f}m"
-            elif distance_m is not None:
-                label += f" ({distance_m:.1f}m)"
-            if has_weapon:
-                label += f" WEAPON:{weapon_conf:.2f}"
-            
-            # Draw label
-            cv2.putText(img_annotated, label, (x1, y1 - 10),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
-        
-        # Add drone label
+        tracks = viewer.tracks_from_detections(detections, weapon_results, track_id_start=1)
+        img_annotated = viewer.draw_bbox(image, tracks, show_confidence=self.show_weapon_confidence)
+
+        # Keep a simple top label for the side-by-side fused visualization.
         cv2.putText(img_annotated, drone_label, (20, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
-        
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
         return img_annotated
     
     def fuse_frame_detections(self, detections1, detections2, weapon_results1, weapon_results2, frame_idx):
@@ -846,50 +810,52 @@ class DualDroneDetectionPipeline:
         
         # Concatenate horizontally
         combined = np.hstack([img1, img2])
-        
-        # Add fusion information text overlay with fused confidence
-        info_y = 60
-        header_text = "=== FUSED DETECTIONS ==="
-        cv2.putText(combined, header_text, (10, info_y), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-        info_y += 30
-        
-        for i, det in enumerate(fused_detections):
+
+        # Viewer-style info panels (translucent background + PIL text)
+        panel_scale = max(0.7, min(1.6, max_h / 720.0))
+
+        # Panel 1: fused detections summary
+        fused_lines = [("FUSED DETECTIONS", viewer.color_text_title)]
+        max_lines = 12
+        for i, det in enumerate(fused_detections[:max_lines]):
             source = det.get('source', 'unknown')
-            conf = det.get('person_confidence', det.get('confidence', 0.0))  # fused confidence
-            has_weapon = det.get('has_weapon', False)
-            weapon_conf = det.get('weapon_confidence', 0.0)
+            conf = det.get('person_confidence', det.get('confidence', 0.0))
+            has_weapon = bool(det.get('has_weapon', False))
+            weapon_conf = float(det.get('weapon_confidence', 0.0) or 0.0)
             distance = det.get('distance_m')
-            bearing = det.get('bearing_deg')
-            
-            # Create detailed info text
+
             info_text = f"#{i+1}: {source} | Conf={conf:.3f}"
             if distance is not None and distance > 0:
                 info_text += f" | Dist={distance:.1f}m"
             if has_weapon:
-                info_text += f" | WEAPON={weapon_conf:.3f}"
+                info_text += f" | ARMADO={weapon_conf:.3f}"
             if det.get('source') == 'fused' and det.get('fused_geoposition'):
                 try:
                     lat = float(det['fused_geoposition']['latitude'])
                     lon = float(det['fused_geoposition']['longitude'])
-                    info_text += f" | FUSED_GEO={lat:.6f},{lon:.6f}"
+                    info_text += f" | GEO={lat:.6f},{lon:.6f}"
                 except Exception:
                     pass
-            
-            # Color based on weapon detection
-            text_color = (0, 0, 255) if has_weapon else (0, 255, 255)
-            
-            cv2.putText(combined, info_text, (10, info_y), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, text_color, 2)
-            info_y += 25
 
-        # Geo comparison overlay (per-drone), mainly for debugging/consistency checks.
-        info_y += 10
-        geo_header_text = "=== GEO COMPARISON (per-drone) ==="
-        cv2.putText(combined, geo_header_text, (10, info_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255, 255, 0), 2)
-        info_y += 28
+            line_color = viewer.color_text_weapon if has_weapon else viewer.color_text_body
+            fused_lines.append((info_text, line_color))
 
+        if len(fused_detections) > max_lines:
+            fused_lines.append((f"... ({len(fused_detections) - max_lines} more)", viewer.color_text_body))
+
+        combined, panel1_rect = viewer.draw_info_panel(
+            combined,
+            fused_lines,
+            x=10,
+            y=50,
+            scale_factor=panel_scale,
+            align='left',
+            bg_color=(0, 0, 0),
+            bg_opacity=0.78,
+        )
+
+        # Panel 2: geo comparison (per-drone)
+        geo_lines = [("GEO COMPARISON (per-drone)", viewer.color_text_title)]
         max_geo_lines = 6
         for i, det in enumerate(fused_detections[:max_geo_lines]):
             bbox1 = det.get('bbox_drone1') if det.get('source') == 'fused' else (det.get('bbox') if det.get('source') == 'drone1' else None)
@@ -898,32 +864,62 @@ class DualDroneDetectionPipeline:
             geo1 = self.find_geoposition_by_bbox(detections1, bbox1) if detections1 and bbox1 else None
             geo2 = self.find_geoposition_by_bbox(detections2, bbox2) if detections2 and bbox2 else None
 
-            # Format geo inline
             geo1_str = f"({geo1.get('latitude', 0):.6f},{geo1.get('longitude', 0):.6f})" if geo1 and isinstance(geo1, dict) else "None"
             geo2_str = f"({geo2.get('latitude', 0):.6f},{geo2.get('longitude', 0):.6f})" if geo2 and isinstance(geo2, dict) else "None"
             geo_text = f"#{i+1}: D1={geo1_str} | D2={geo2_str}"
+            geo_lines.append((geo_text, viewer.color_text_body))
 
-            cv2.putText(combined, geo_text, (10, info_y),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 0), 2)
-            info_y += 22
+        p1_x1, p1_y1, p1_x2, p1_y2 = panel1_rect
+        geo_y = min(max_h - 10, p1_y2 + int(12 * panel_scale))
+        combined, _ = viewer.draw_info_panel(
+            combined,
+            geo_lines,
+            x=10,
+            y=int(geo_y),
+            scale_factor=panel_scale,
+            align='left',
+            bg_color=(0, 0, 0),
+            bg_opacity=0.72,
+        )
         
-        # Add summary at the bottom
-        summary_y = max_h - 40
+
+        # Bottom summary panel
         total_dets = len(fused_detections)
         total_weapons = sum(1 for d in fused_detections if d.get('has_weapon', False))
         avg_conf = np.mean([d.get('person_confidence', d.get('confidence', 0.0)) for d in fused_detections]) if fused_detections else 0.0
-        
-        summary_text = f"Total: {total_dets} persons, {total_weapons} weapons | Avg Fused Conf: {avg_conf:.3f}"
-        cv2.putText(combined, summary_text, (10, summary_y),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # Add title
-        title_d1 = "Drone 1"
-        title_d2 = "Drone 2"
-        cv2.putText(combined, title_d1, (w1//2 - 50, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
-        cv2.putText(combined, title_d2, (w1 + w2//2 - 50, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
+        summary_text = f"Total: {total_dets} persons, {total_weapons} armed | Avg fused conf: {avg_conf:.3f}"
+        combined, _ = viewer.draw_info_panel(
+            combined,
+            [(summary_text, viewer.color_text_body)],
+            x=10,
+            y=int(max_h - int(45 * panel_scale)),
+            scale_factor=panel_scale,
+            align='left',
+            bg_color=(0, 0, 0),
+            bg_opacity=0.70,
+        )
+
+        # Titles (viewer style)
+        combined, _ = viewer.draw_info_panel(
+            combined,
+            [("Drone 1", viewer.color_text_title)],
+            x=int(w1 // 2),
+            y=10,
+            scale_factor=panel_scale,
+            align='center',
+            bg_color=(0, 0, 0),
+            bg_opacity=0.65,
+        )
+        combined, _ = viewer.draw_info_panel(
+            combined,
+            [("Drone 2", viewer.color_text_title)],
+            x=int(w1 + (w2 // 2)),
+            y=10,
+            scale_factor=panel_scale,
+            align='center',
+            bg_color=(0, 0, 0),
+            bg_opacity=0.65,
+        )
         
         return combined
 

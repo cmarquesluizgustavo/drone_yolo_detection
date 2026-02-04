@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 from people_detector import PeopleDetector
 from detection_statistics import DetectionStatistics
+import viewer
 
 # File format and processing constants
 SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.bmp']
@@ -28,6 +29,7 @@ class DetectionPipeline:
         # Pipeline settings
         self.save_crops = True  # Default to saving crops
         self.enable_weapon_detection = enable_weapon_detection
+        self.show_weapon_confidence = False
 
         # Optional filter to drop known background/irrelevant people from detections.
         # This is useful when an unrelated person appears in the background and
@@ -165,46 +167,9 @@ class DetectionPipeline:
         return self.detector.weapon_detector.process_multiple_crops(crops_with_info)
     
     def draw_boxes_on_image(self, image, detections_info, weapon_results=None):
-        result_image = image.copy()
-        box_thickness = 2
-        font_scale = 0.5
-        font_thickness = 2
-    
-        # Draw person boxes in GREEN
-        for detection in detections_info:
-            x1, y1, x2, y2 = detection['bbox']
-            person_confidence = detection.get('person_confidence', detection.get('confidence'))
-            distance_m = detection.get('distance_m', None)
-            dist_p = detection.get('distance_pinhole_m', None)
-            dist_t = detection.get('distance_pitch_m', None)
-            
-            person_box_color = (0, 255, 0)  # Green for person
-            cv2.rectangle(result_image, 
-                        (int(x1), int(y1)), 
-                        (int(x2), int(y2)), 
-                        person_box_color, box_thickness)
-            
-            # Add confidence label
-            label = f"Person: {person_confidence:.2f}"
-            # Show both distance estimates when available for easy comparison.
-            if dist_p is not None or dist_t is not None:
-                if dist_p is not None:
-                    label += f" P:{dist_p:.1f}m"
-                if dist_t is not None:
-                    label += f" Pitch:{dist_t:.1f}m"
-            elif distance_m is not None:
-                label += f" ({distance_m:.1f}m)"
-            
-            cv2.putText(result_image, label, 
-                      (int(x1), int(y1) - 10), 
-                      cv2.FONT_HERSHEY_SIMPLEX, font_scale, 
-                      person_box_color, font_thickness)
-        
-        # Draw weapon boxes in RED (if any detected)
-        if weapon_results:
-            result_image = self.draw_weapon_boxes(result_image, weapon_results)
-        
-        return result_image
+        # New viewer scheme (bbox + centered info panel, optional weapon confidence).
+        tracks = viewer.tracks_from_detections(detections_info, weapon_results, track_id_start=1)
+        return viewer.draw_bbox(image, tracks, show_confidence=self.show_weapon_confidence)
 
     def draw_weapon_boxes(self, image, weapon_results):
         box_thickness = 2
