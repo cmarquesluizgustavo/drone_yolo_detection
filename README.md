@@ -12,6 +12,20 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
+### (Optional) Summarize logs into LaTeX tables
+
+If you have console logs under `logs/`, you can export the detection + RMSE tables (LaTeX) into a `.txt` file:
+
+```bash
+python summarize_logs.py --log-dir logs --pattern run_*_console.log --format latex --out output/log_tables.txt
+```
+
+To export a single run log:
+
+```bash
+python summarize_logs.py --log-dir logs --pattern run_20260205_125250_console.log --format latex --out output/log_tables_20260205_125250.txt
+```
+
 Models in this repo:
 - Person model: `models/people/yolo11n.pt`
 - Weapon model: `models/weapons/best.pt`
