@@ -1,0 +1,151 @@
+
+============================================================
+Found angle subdirectories: 45, 90
+Processing each angle separately...
+============================================================
+
+
+============================================================
+PROCESSING ANGLE: 45°
+============================================================
+
+Found 61 matching sample pairs
+
+============================================================
+Processing sample 1/61: falso_05_02_clip_000_1080p_none_10fps_every10frames
+============================================================
+  Sample type: FALSO (has_weapons=False)
+  Drone 1: 10 frames
+  Drone 2: 10 frames
+  Synchronized: 10 frame pairs
+    Processing frame 1/10
+  DEBUG Drone positions:
+    Drone 1: lat=22.820683, lon=43.186691, yaw=-148.2°
+    Drone 2: lat=22.820717, lon=43.186783, yaw=159.3°
+      Frame 0: D1=1 people, D2=1 people
+    DEBUG Triangulation input:
+      UAV1 xy=(10642216.25, 9526534.39) from geo=(22.820683, 43.186691)
+      UAV2 xy=(10642208.64, 9526558.98) from geo=(22.820717, 43.186783)
+      D1: distance=4.41m, bearing=213.7°, det_xy=(10642213.80, 9526530.72)
+      D2: distance=3.84m, bearing=161.4°, det_xy=(10642209.87, 9526555.33)
+      Frame 0: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.71, d1_pitch-based=4.41, d2_height-based=3.41, d2_pitch-based=3.84, geo1=(22.820691,43.186676), geo2=(22.820712,43.186769), d1_fused=0.80, d2_fused=25.23, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.84, c2=0.85, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 1: D1=1 people, D2=1 people
+      Frame 1: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.69, d1_pitch-based=4.45, d2_height-based=3.40, d2_pitch-based=3.82, geo1=(22.820691,43.186676), geo2=(22.820712,43.186770), d1_fused=0.85, d2_fused=25.21, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.83, c2=0.85, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 2: D1=1 people, D2=1 people
+      Frame 2: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.72, d1_pitch-based=4.48, d2_height-based=3.43, d2_pitch-based=3.82, geo1=(22.820691,43.186676), geo2=(22.820712,43.186769), d1_fused=0.86, d2_fused=25.20, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.84, c2=0.85, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 3: D1=1 people, D2=1 people
+      Frame 3: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.78, d1_pitch-based=4.51, d2_height-based=3.39, d2_pitch-based=3.80, geo1=(22.820691,43.186676), geo2=(22.820712,43.186770), d1_fused=0.80, d2_fused=25.24, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.84, c2=0.84, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 4: D1=1 people, D2=1 people
+      Frame 4: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.62, d1_pitch-based=4.62, d2_height-based=3.44, d2_pitch-based=3.78, geo1=(22.820691,43.186676), geo2=(22.820712,43.186770), d1_fused=0.77, d2_fused=25.26, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.81, c2=0.84, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 5: D1=1 people, D2=1 people
+      Frame 5: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.65, d1_pitch-based=4.67, d2_height-based=3.35, d2_pitch-based=3.81, geo1=(22.820691,43.186675), geo2=(22.820712,43.186770), d1_fused=0.81, d2_fused=25.23, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.81, c2=0.86, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 6: D1=1 people, D2=1 people
+      Frame 6: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.73, d1_pitch-based=4.50, d2_height-based=3.38, d2_pitch-based=3.81, geo1=(22.820691,43.186676), geo2=(22.820712,43.186770), d1_fused=0.87, d2_fused=25.19, geo_fused=(22.820681,43.186694)
+DETECTIONS: c1=0.84, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 7: D1=1 people, D2=1 people
+      Frame 7: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.77, d1_pitch-based=4.45, d2_height-based=3.43, d2_pitch-based=3.83, geo1=(22.820691,43.186676), geo2=(22.820712,43.186769), d1_fused=0.95, d2_fused=25.15, geo_fused=(22.820681,43.186694)
+DETECTIONS: c1=0.84, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 8: D1=1 people, D2=1 people
+      Frame 8: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.76, d1_pitch-based=4.37, d2_height-based=3.45, d2_pitch-based=3.87, geo1=(22.820691,43.186676), geo2=(22.820712,43.186769), d1_fused=0.92, d2_fused=25.16, geo_fused=(22.820681,43.186694)
+DETECTIONS: c1=0.84, c2=0.85, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 9: D1=1 people, D2=1 people
+      Frame 9: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.79, d1_pitch-based=4.31, d2_height-based=3.43, d2_pitch-based=3.90, geo1=(22.820690,43.186676), geo2=(22.820711,43.186769), d1_fused=0.91, d2_fused=25.17, geo_fused=(22.820681,43.186694)
+DETECTIONS: c1=0.85, c2=0.84, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+  ✓ Completed all 10 frames
+
+============================================================
+Processing sample 2/61: falso_05_02_clip_001_1080p_none_10fps_every10frames
+============================================================
+  Sample type: FALSO (has_weapons=False)
+  Drone 1: 10 frames
+  Drone 2: 10 frames
+  Synchronized: 10 frame pairs
+    Processing frame 1/10
+  DEBUG Drone positions:
+    Drone 1: lat=22.820683, lon=43.186691, yaw=-148.2°
+    Drone 2: lat=22.820717, lon=43.186783, yaw=159.3°
+      Frame 0: D1=1 people, D2=1 people
+      Frame 0: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.77, d1_pitch-based=4.28, d2_height-based=3.44, d2_pitch-based=3.93, geo1=(22.820690,43.186677), geo2=(22.820711,43.186769), d1_fused=0.85, d2_fused=25.20, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.84, c2=0.82, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 1: D1=1 people, D2=1 people
+      Frame 1: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.77, d1_pitch-based=4.27, d2_height-based=3.47, d2_pitch-based=3.93, geo1=(22.820690,43.186677), geo2=(22.820711,43.186769), d1_fused=0.77, d2_fused=25.25, geo_fused=(22.820682,43.186694)
+DETECTIONS: c1=0.84, c2=0.82, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 2: D1=1 people, D2=1 people
+      Frame 2: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.77, d1_pitch-based=4.28, d2_height-based=3.40, d2_pitch-based=4.05, geo1=(22.820690,43.186677), geo2=(22.820711,43.186769), d1_fused=0.66, d2_fused=25.32, geo_fused=(22.820682,43.186693)
+DETECTIONS: c1=0.86, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 3: D1=1 people, D2=1 people
+      Frame 3: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.82, d1_pitch-based=4.36, d2_height-based=3.48, d2_pitch-based=3.88, geo1=(22.820691,43.186676), geo2=(22.820712,43.186769), d1_fused=1.12, d2_fused=26.45, geo_fused=(22.820685,43.186687)
+DETECTIONS: c1=0.85, c2=0.84, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 4: D1=1 people, D2=1 people
+      Frame 4: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.88, d1_pitch-based=4.25, d2_height-based=3.47, d2_pitch-based=3.90, geo1=(22.820691,43.186677), geo2=(22.820713,43.186769), d1_fused=2.66, d2_fused=27.45, geo_fused=(22.820688,43.186682)
+DETECTIONS: c1=0.85, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 5: D1=1 people, D2=1 people
+      Frame 5: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.58, d1_pitch-based=3.99, d2_height-based=3.46, d2_pitch-based=3.89, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.25, d2_fused=27.12, geo_fused=(22.820687,43.186684)
+DETECTIONS: c1=0.76, c2=0.84, c_fused=0.96, w1=None, w2=None, w_fused=0.00
+      Frame 6: D1=2 people, D2=1 people
+      Frame 6: Fused 1 detections from both drones, total 2 detections
+DISTANCE: d1_height-based=3.58, d1_pitch-based=4.03, d2_height-based=3.45, d2_pitch-based=3.88, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.36, d2_fused=27.17, geo_fused=(22.820688,43.186683)
+DETECTIONS: c1=0.77, c2=0.86, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 7: D1=1 people, D2=1 people
+      Frame 7: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.61, d1_pitch-based=4.05, d2_height-based=3.46, d2_pitch-based=3.89, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.33, d2_fused=27.15, geo_fused=(22.820687,43.186683)
+DETECTIONS: c1=0.71, c2=0.85, c_fused=0.96, w1=None, w2=None, w_fused=0.00
+      Frame 8: D1=1 people, D2=1 people
+      Frame 8: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.56, d1_pitch-based=3.96, d2_height-based=3.49, d2_pitch-based=3.92, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.35, d2_fused=27.17, geo_fused=(22.820688,43.186683)
+DETECTIONS: c1=0.84, c2=0.87, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 9: D1=1 people, D2=1 people
+      Frame 9: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.59, d1_pitch-based=3.97, d2_height-based=3.46, d2_pitch-based=3.87, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.35, d2_fused=27.17, geo_fused=(22.820688,43.186683)
+DETECTIONS: c1=0.84, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+  ✓ Completed all 10 frames
+
+============================================================
+Processing sample 3/61: falso_05_02_clip_002_1080p_none_10fps_every10frames
+============================================================
+  Sample type: FALSO (has_weapons=False)
+  Drone 1: 10 frames
+  Drone 2: 10 frames
+  Synchronized: 10 frame pairs
+    Processing frame 1/10
+  DEBUG Drone positions:
+    Drone 1: lat=22.820683, lon=43.186691, yaw=-148.2°
+    Drone 2: lat=22.820717, lon=43.186783, yaw=159.3°
+      Frame 0: D1=1 people, D2=1 people
+      Frame 0: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.57, d1_pitch-based=3.90, d2_height-based=3.44, d2_pitch-based=3.85, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.44, d2_fused=27.22, geo_fused=(22.820688,43.186683)
+DETECTIONS: c1=0.85, c2=0.85, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 1: D1=1 people, D2=1 people
+      Frame 1: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.59, d1_pitch-based=3.98, d2_height-based=3.41, d2_pitch-based=3.80, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.40, d2_fused=27.20, geo_fused=(22.820688,43.186683)
+DETECTIONS: c1=0.84, c2=0.86, c_fused=0.98, w1=None, w2=None, w_fused=0.00
+      Frame 2: D1=2 people, D2=1 people
+      Frame 2: Fused 1 detections from both drones, total 2 detections
+DISTANCE: d1_height-based=3.57, d1_pitch-based=3.99, d2_height-based=3.45, d2_pitch-based=3.79, geo1=(22.820691,43.186678), geo2=(22.820713,43.186769), d1_fused=2.32, d2_fused=27.15, geo_fused=(22.820687,43.186683)
+DETECTIONS: c1=0.84, c2=0.84, c_fused=0.97, w1=None, w2=None, w_fused=0.00
+      Frame 3: D1=1 people, D2=1 people
+      Frame 3: Fused 1 detections from both drones, total 1 detections
+DISTANCE: d1_height-based=3.58, d1_pitch-based=3.97, d2_height-based=3.74, d2_pitch-based=4.02, geo1=(22.820691,43.186678), geo2=(22.820713,43.186768), d1_fused=3.35, d2_fused=27.82, geo_fused=(22.820689,43.186680)
+DETECTIONS: c1=0.84, c2=0.84, c_fused=0.97, w1=None, w2=None, w_fused=0.00

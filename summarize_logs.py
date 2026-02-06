@@ -36,6 +36,7 @@ _OVERALL_DISTANCE_RMSE_RE = re.compile(
     r"^\s*OVERALL DISTANCE ESTIMATION RMSE:\s*(?P<rmse>[-+]?(?:\d+\.\d+|\d+))m\s*$"
 )
 _RMSE_BY_COMBO_HDR_RE = re.compile(r"^\s*RMSE BY \(DISTANCE, HEIGHT\) COMBINATIONS:\s*$")
+_RMSE_BY_COMBO_PINHOLE_HDR_RE = re.compile(r"^\s*PINHOLE RMSE BY \(DISTANCE, HEIGHT\) COMBINATIONS:\s*$")
 _RMSE_COMBO_RE = re.compile(
     r"^\s*Distance:\s*(?P<distance>[-+]?(?:\d+\.\d+|\d+))m,\s*Height:\s*(?P<height>[-+]?(?:\d+\.\d+|\d+))m\s*$"
 )
@@ -158,6 +159,7 @@ class SetupMetrics:
     rmse_overall_m: Optional[float] = None
     rmse_methods_m: Dict[str, float] = field(default_factory=dict)  # keys: 'pinhole', 'pitch'
     rmse_by_combo_m: Dict[str, float] = field(default_factory=dict)  # key: 'distance,height' like '5.0,2.0'
+    rmse_pinhole_by_combo_m: Dict[str, float] = field(default_factory=dict)  # parsed from PINHOLE RMSE BY ...
     fused_geo_rmse_m: Optional[float] = None
 
     def to_dict(self) -> Dict[str, Any]:
@@ -169,6 +171,7 @@ class SetupMetrics:
             "rmse_overall_m": self.rmse_overall_m,
             "rmse_methods_m": self.rmse_methods_m,
             "rmse_by_combo_m": self.rmse_by_combo_m,
+            "rmse_pinhole_by_combo_m": self.rmse_pinhole_by_combo_m,
             "fused_geo_rmse_m": self.fused_geo_rmse_m,
         }
 
@@ -222,6 +225,7 @@ def summarize_log_file(path: Path) -> LogSummary:
     current_setup: Optional[str] = None
     current_metric_scope: Optional[str] = None  # 'overall' | 'per_sample' | None
     in_rmse_combo: bool = False
+    rmse_combo_target: str = "primary"  # 'primary' | 'pinhole'
     in_rmse_methods: bool = False
     current_combo_key: Optional[str] = None
 
@@ -242,6 +246,7 @@ def summarize_log_file(path: Path) -> LogSummary:
                 current_setup = None
                 current_metric_scope = None
                 in_rmse_combo = False
+                rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
                 continue
@@ -301,6 +306,7 @@ def summarize_log_file(path: Path) -> LogSummary:
                     _get_or_create_setup_metrics(summary, current_angle, current_setup)
                 current_metric_scope = None
                 in_rmse_combo = False
+                rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
                 continue
@@ -325,6 +331,7 @@ def summarize_log_file(path: Path) -> LogSummary:
             if _OVERALL_METRICS_HDR_RE.match(line):
                 current_metric_scope = "overall"
                 in_rmse_combo = False
+                rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
                 continue
@@ -332,6 +339,7 @@ def summarize_log_file(path: Path) -> LogSummary:
             if _PER_SAMPLE_METRICS_HDR_RE.match(line):
                 current_metric_scope = "per_sample"
                 in_rmse_combo = False
+                rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
                 continue
@@ -356,6 +364,15 @@ def summarize_log_file(path: Path) -> LogSummary:
 
             if _RMSE_BY_COMBO_HDR_RE.match(line):
                 in_rmse_combo = True
+                rmse_combo_target = "primary"
+                in_rmse_methods = False
+                current_metric_scope = None
+                current_combo_key = None
+                continue
+
+            if _RMSE_BY_COMBO_PINHOLE_HDR_RE.match(line):
+                in_rmse_combo = True
+                rmse_combo_target = "pinhole"
                 in_rmse_methods = False
                 current_metric_scope = None
                 current_combo_key = None
@@ -379,7 +396,10 @@ def summarize_log_file(path: Path) -> LogSummary:
                 if current_combo_key is not None:
                     m = _RMSE_CLASS_ALL_RE.match(line)
                     if m:
-                        setup_metrics.rmse_by_combo_m[current_combo_key] = float(m.group("rmse"))
+                        if rmse_combo_target == "pinhole":
+                            setup_metrics.rmse_pinhole_by_combo_m[current_combo_key] = float(m.group("rmse"))
+                        else:
+                            setup_metrics.rmse_by_combo_m[current_combo_key] = float(m.group("rmse"))
                         continue
 
             if in_rmse_methods:

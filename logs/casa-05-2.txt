@@ -1,0 +1,52 @@
+\begin{table}[ht]
+\centering
+\caption{Detection performance at frame and sample levels for single-UAV and fused configurations.}
+\label{tab:detection_combined}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{l l c c c c c c c c c}
+\hline
+\textbf{Level} & \textbf{Setup} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{TP} & \textbf{FP} & \textbf{FN} & \textbf{TN} & \textbf{Total} \\
+\hline
+\hline
+Frame & Drone 1 (45°) & 0.685 & 0.938 & 0.428 & 0.588 & 137 & 9 & 183 & 281 & 610 \\
+Sample & Drone 1 (45°) & 0.500 & 1.000 & 0.500 & 0.667 & 16 & 0 & 16 & 30 & 61 \\
+Frame & Drone 2 (45°) & 0.684 & 0.985 & 0.403 & 0.572 & 129 & 2 & 191 & 288 & 610 \\
+Sample & Drone 2 (45°) & 0.312 & 1.000 & 0.312 & 0.476 & 10 & 0 & 22 & 30 & 61 \\
+Frame & Fused (45°) & 0.784 & 0.948 & 0.622 & 0.751 & 199 & 11 & 121 & 279 & 610 \\
+Sample & Fused (45°) & 0.656 & 1.000 & 0.656 & 0.792 & 21 & 0 & 11 & 30 & 61 \\
+Frame & Drone 1 (90°) & 0.652 & 0.839 & 0.347 & 0.491 & 104 & 20 & 196 & 300 & 620 \\
+Sample & Drone 1 (90°) & 0.367 & 1.000 & 0.367 & 0.524 & 11 & 1 & 19 & 32 & 62 \\
+Frame & Drone 2 (90°) & 0.687 & 0.957 & 0.370 & 0.534 & 111 & 5 & 189 & 315 & 620 \\
+Sample & Drone 2 (90°) & 0.400 & 1.000 & 0.400 & 0.571 & 12 & 0 & 18 & 33 & 62 \\
+Frame & Fused (90°) & 0.776 & 0.882 & 0.620 & 0.728 & 186 & 25 & 114 & 295 & 620 \\
+Sample & Fused (90°) & 0.667 & 1.000 & 0.667 & 0.784 & 20 & 1 & 10 & 32 & 62 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{table}[ht]
+\centering
+\caption{RMSE (meters) by distance, altitude, viewing angle, and estimator.}
+\label{tab:rmse_detailed}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{l c c c c c}
+\hline
+\textbf{Estimator} & \textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Drone 1} & \textbf{Drone 2} \\
+\hline
+Pitch-based & 45 & 10.0 & 2.0 & 1.375 & 1.408 \\
+Pitch-based & 45 & 10.0 & 5.0 & 2.288 & 0.432 \\
+Pitch-based & 45 & 5.0 & 2.0 & 0.627 & 0.863 \\
+Pitch-based & 45 & 5.0 & 5.0 & 0.523 & 0.843 \\
+Pinhole (overall) & 45 & all & all & 1.633 & 1.687 \\
+Pitch-based (overall) & 45 & all & all & 1.337 & 0.971 \\
+Pitch-based & 90 & 10.0 & 2.0 & 1.344 & 1.952 \\
+Pitch-based & 90 & 10.0 & 5.0 & 0.535 & 2.516 \\
+Pitch-based & 90 & 5.0 & 2.0 & 0.541 & 1.488 \\
+Pitch-based & 90 & 5.0 & 5.0 & 1.144 & 0.559 \\
+Pinhole (overall) & 90 & all & all & 1.796 & 1.812 \\
+Pitch-based (overall) & 90 & all & all & 0.974 & 1.749 \\
+\hline
+\end{tabular}%
+}
+\end{table}

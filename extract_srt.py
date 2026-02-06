@@ -48,14 +48,27 @@ def extract_first_values_from_srt(srt_path: str) -> dict:
         content = f.read()
     
     result = {}
-    
-    # Extract first GPS coordinates: GPS(W: lon, S: lat, altitude)
-    gps_pattern = r'GPS\(W:\s*([-\d.]+),\s*S:\s*([-\d.]+),\s*[-\d.]+m?\)'
-    gps_match = re.search(gps_pattern, content)
-    
-    if gps_match:
-        result['lon'] = float(gps_match.group(1))
-        result['lat'] = float(gps_match.group(2))
+
+    def _apply_dir(value: str, direction: str) -> float:
+        direction = str(direction).upper().strip()
+        v = float(value)
+        if direction in ('W', 'S'):
+            return -abs(v)
+        return abs(v)
+
+    # Prefer HOME() coordinates if present; otherwise fall back to GPS().
+    # Note: DJI-style subtitles use N/S/E/W as *direction*, not sign.
+    home_pattern = r'HOME\((?P<lon_dir>[EW]):\s*(?P<lon>[\d.]+),\s*(?P<lat_dir>[NS]):\s*(?P<lat>[\d.]+)\)'
+    home_match = re.search(home_pattern, content)
+    if home_match:
+        result['lon'] = _apply_dir(home_match.group('lon'), home_match.group('lon_dir'))
+        result['lat'] = _apply_dir(home_match.group('lat'), home_match.group('lat_dir'))
+    else:
+        gps_pattern = r'GPS\((?P<lon_dir>[EW]):\s*(?P<lon>[\d.]+),\s*(?P<lat_dir>[NS]):\s*(?P<lat>[\d.]+),\s*[-\d.]+m?\)'
+        gps_match = re.search(gps_pattern, content)
+        if gps_match:
+            result['lon'] = _apply_dir(gps_match.group('lon'), gps_match.group('lon_dir'))
+            result['lat'] = _apply_dir(gps_match.group('lat'), gps_match.group('lat_dir'))
     
     # Extract first G.PRY (gimbal pitch, roll, yaw)
     pry_pattern = r'G\.PRY\s*\(\s*([-\d.]+)°,\s*([-\d.]+)°,\s*([-\d.]+)°\)'

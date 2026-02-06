@@ -688,7 +688,7 @@ class DualDroneDetectionPipeline:
             x, y = detection['x'], detection['y']
             
             # Convert back to geographic coordinates
-            lat, lon = GeoConverter.xy_to_geo(x, y)
+            lat, lon = GeoConverter.xy_to_geo(x, y, ref_lat=self.camera_drone1.lat, ref_lon=self.camera_drone1.lon)
             
             # Determine source and bbox info
             source = 'fused' if len(detection['drone_measurements']) > 1 else f"drone{detection.get('drone_id', 1)}"

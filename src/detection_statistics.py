@@ -504,6 +504,34 @@ class DetectionStatistics:
                 rmse_all = self.compute_rmse(all_pairs)
                 if rmse_all is not None:
                     print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
+
+        # Print PINHOLE (height-based) RMSE by (distance, height) combinations.
+        # This is method-specific and uses the per-method buckets collected during processing.
+        if self.distance_pairs_pinhole_by_combo:
+            print(f"\nPINHOLE RMSE BY (DISTANCE, HEIGHT) COMBINATIONS:")
+
+            pinhole_by_dist_height = {}
+            for (cls, dist, height), pairs in self.distance_pairs_pinhole_by_combo.items():
+                key = (dist, height)
+                if key not in pinhole_by_dist_height:
+                    pinhole_by_dist_height[key] = []
+                pinhole_by_dist_height[key].extend(pairs)
+
+            for (dist, height) in sorted(pinhole_by_dist_height.keys()):
+                print(f"   Distance: {dist}m, Height: {height}m")
+                for cls in ['falso', 'real']:
+                    cls_key = (cls, dist, height)
+                    pairs = self.distance_pairs_pinhole_by_combo.get(cls_key)
+                    if not pairs:
+                        continue
+                    rmse_cls = self.compute_rmse(pairs)
+                    if rmse_cls is not None:
+                        print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
+
+                all_pairs = pinhole_by_dist_height[(dist, height)]
+                rmse_all = self.compute_rmse(all_pairs)
+                if rmse_all is not None:
+                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
         
         # Print RMSE by (distance, height, camera pitch) combinations, showing per-class and aggregate
         if self.distance_pairs_by_dist_height_pitch:

@@ -35,7 +35,7 @@ def target_geoposition(camera, distance_m, bearing_deg):
     y_target = cam_y + distance_m * math.cos(bearing_rad)
     
     # Convert back to geographic coordinates
-    lat, lon = GeoConverter.xy_to_geo(x_target, y_target)
+    lat, lon = GeoConverter.xy_to_geo(x_target, y_target, ref_lat=camera.lat, ref_lon=camera.lon)
     return lat, lon
 
 
