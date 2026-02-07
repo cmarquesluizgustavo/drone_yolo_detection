@@ -53,6 +53,12 @@ class DetectionStatistics:
 
         # Fused (dual-drone) RMSE evaluation (distance derived from fused geoposition)
         self.distance_pairs_fused = []  # (est_fused_distance, real)
+        self.distance_pairs_fused_d1 = []  # (est_fused_distance_d1, real)
+        self.distance_pairs_fused_d2 = []  # (est_fused_distance_d2, real)
+
+        # Fused-geo RMSE by (distance, height) bucket, per drone.
+        self.distance_pairs_fused_d1_by_dist_height = {}  # {(dist, height): [(est, real), ...]}
+        self.distance_pairs_fused_d2_by_dist_height = {}  # {(dist, height): [(est, real), ...]}
 
         # Method-specific RMSE evaluation by (class, distance, height)
         self.distance_pairs_pinhole_by_combo = {}  # {(cls, dist, height): [(est, real), ...]}
@@ -151,6 +157,8 @@ class DetectionStatistics:
         distance_pairs_pinhole=None,
         distance_pairs_pitch=None,
         distance_pairs_fused=None,
+        distance_pairs_fused_d1=None,
+        distance_pairs_fused_d2=None,
     ):
         """Add results from processing one image."""
 
@@ -258,6 +266,20 @@ class DetectionStatistics:
             self.distance_pairs_pitch.extend(distance_pairs_pitch)
         if distance_pairs_fused:
             self.distance_pairs_fused.extend(distance_pairs_fused)
+        if distance_pairs_fused_d1:
+            self.distance_pairs_fused_d1.extend(distance_pairs_fused_d1)
+            if real_distance is not None and cam_height_m is not None:
+                key = (real_distance, cam_height_m)
+                if key not in self.distance_pairs_fused_d1_by_dist_height:
+                    self.distance_pairs_fused_d1_by_dist_height[key] = []
+                self.distance_pairs_fused_d1_by_dist_height[key].extend(distance_pairs_fused_d1)
+        if distance_pairs_fused_d2:
+            self.distance_pairs_fused_d2.extend(distance_pairs_fused_d2)
+            if real_distance is not None and cam_height_m is not None:
+                key = (real_distance, cam_height_m)
+                if key not in self.distance_pairs_fused_d2_by_dist_height:
+                    self.distance_pairs_fused_d2_by_dist_height[key] = []
+                self.distance_pairs_fused_d2_by_dist_height[key].extend(distance_pairs_fused_d2)
 
         # Store method-specific pairs by (class, distance, height) when possible.
         if sample_class is not None and real_distance is not None and cam_height_m is not None:
@@ -561,6 +583,8 @@ class DetectionStatistics:
         rmse_pinhole = self.compute_rmse(self.distance_pairs_pinhole)
         rmse_pitch = self.compute_rmse(self.distance_pairs_pitch)
         rmse_fused = self.compute_rmse(self.distance_pairs_fused)
+        rmse_fused_d1 = self.compute_rmse(self.distance_pairs_fused_d1)
+        rmse_fused_d2 = self.compute_rmse(self.distance_pairs_fused_d2)
         if rmse_pinhole is not None or rmse_pitch is not None:
             print("\nDISTANCE ESTIMATION METHOD COMPARISON:")
             if rmse_pinhole is not None:
@@ -574,6 +598,12 @@ class DetectionStatistics:
 
         if rmse_fused is not None:
             print(f"   FUSED-GEO DISTANCE RMSE: {rmse_fused:.3f}m ({len(self.distance_pairs_fused)} measurements)")
+
+        # When running dual-drone fusion, also report per-drone fused-geo RMSE.
+        if rmse_fused_d1 is not None:
+            print(f"   FUSED-GEO DISTANCE RMSE (D1): {rmse_fused_d1:.3f}m ({len(self.distance_pairs_fused_d1)} measurements)")
+        if rmse_fused_d2 is not None:
+            print(f"   FUSED-GEO DISTANCE RMSE (D2): {rmse_fused_d2:.3f}m ({len(self.distance_pairs_fused_d2)} measurements)")
 
         # Method comparison by (class, distance, height, camera pitch)
         if self.distance_pairs_pinhole_by_combo_pitch or self.distance_pairs_pitch_by_combo_pitch:

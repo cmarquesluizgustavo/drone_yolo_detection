@@ -26,10 +26,17 @@ except ImportError as e:
 class PeopleDetector:
     """Core detector class for person and weapon detection in single images."""
     
-    def __init__(self, model_path: str, person_confidence_threshold: float = 0.5, 
-                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.5):
+    def __init__(
+        self,
+        model_path: str,
+        person_confidence_threshold: float = 0.5,
+        enable_weapon_detection: bool = True,
+        weapon_confidence_threshold: float = 0.5,
+        device=None,
+    ):
         self.logger = logging.getLogger(__name__)
         self.model = YOLO(model_path)
+        self.device = device
         self.person_confidence_threshold = person_confidence_threshold
         self.person_class_id = PERSON_CLASS_ID
         
@@ -40,7 +47,10 @@ class PeopleDetector:
         
         if self.enable_weapon_detection:
             try:
-                self.weapon_detector = WeaponDetector(weapon_confidence_threshold=weapon_confidence_threshold)
+                self.weapon_detector = WeaponDetector(
+                    weapon_confidence_threshold=weapon_confidence_threshold,
+                    device=device,
+                )
                 self.logger.info("Weapon detection enabled (WEAPON_CONFIDENCE=%s)", weapon_confidence_threshold)
             except Exception as e:
                 self.logger.warning("Failed to initialize weapon detector: %s", e)
@@ -93,7 +103,17 @@ class PeopleDetector:
             raise ValueError(f"Could not load image: {image_path}")
             
         # Run inference - only detect person class (class 0)
-        results = self.model(image, imgsz=640, iou=0.6, conf=self.person_confidence_threshold, classes=[0], verbose=False)
+        infer_kwargs = dict(
+            imgsz=640,
+            iou=0.6,
+            conf=self.person_confidence_threshold,
+            classes=[0],
+            verbose=False,
+        )
+        if self.device is not None:
+            infer_kwargs["device"] = self.device
+
+        results = self.model(image, **infer_kwargs)
         
         # Process results
         detections_info = []
@@ -209,7 +229,16 @@ class PeopleDetector:
     
         detector = self.pipeline_drone1.detector if drone_id == 1 else self.pipeline_drone2.detector
         camera = self.camera_drone1 if drone_id == 1 else self.camera_drone2
-        results = detector.model(image, imgsz=640, iou=0.6, conf=self.person_confidence_threshold, classes=[0], verbose=False)
+        infer_kwargs = dict(
+            imgsz=640,
+            iou=0.6,
+            conf=self.person_confidence_threshold,
+            classes=[0],
+            verbose=False,
+        )
+        if getattr(detector, "device", None) is not None:
+            infer_kwargs["device"] = getattr(detector, "device")
+        results = detector.model(image, **infer_kwargs)
         file_data = detector.extract_filename_metadata(image_path)
 
         cam_height_m = file_data.get('cam_height_m')

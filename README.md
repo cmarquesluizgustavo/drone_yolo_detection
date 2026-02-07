@@ -109,6 +109,15 @@ python src/main.py \
    --output output/single_drone
 ```
 
+Run only a single angle (when your input is organized like `inputs/samples/drone1/45/...` and `inputs/samples/drone1/90/...`):
+
+```bash
+python src/main.py \
+   --input inputs/samples/drone1 \
+   --angle 90 \
+   --output output/single_drone
+```
+
 Common options:
 - `--person-confidence 0.6`
 - `--weapon-confidence 0.3`
@@ -122,6 +131,18 @@ python src/main.py \
    --dual-drone \
    --input-drone1 inputs/samples/drone1 \
    --input-drone2 inputs/samples/drone2 \
+   --output output/dual_drone \
+   --association-threshold 100.0
+```
+
+Run only a single angle (filters to the matching common angle):
+
+```bash
+python src/main.py \
+   --dual-drone \
+   --input-drone1 inputs/samples/drone1 \
+   --input-drone2 inputs/samples/drone2 \
+   --angle 90 \
    --output output/dual_drone \
    --association-threshold 100.0
 ```

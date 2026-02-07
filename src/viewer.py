@@ -394,7 +394,12 @@ def _extract_track_data(track):
     return None
 
 
-def _draw_person_overlay(image, track_data, show_confidence=False):
+def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=None):
+    """Draw person overlay with optional extra_lines appended inside the bbox info panel.
+    
+    Args:
+        extra_lines: optional list of (text, color_rgb) tuples to append.
+    """
     bbox = track_data['bbox']
     track_id = track_data['track_id']
     distance = track_data['distance']
@@ -451,7 +456,7 @@ def _draw_person_overlay(image, track_data, show_confidence=False):
     
     # distancia (branco)
     if distance is not None:
-        text_data.append((f"Distância: {distance:.1f}m", color_text_body))
+        text_data.append((f"Distance: {distance:.1f}m", color_text_body))
     
     # coordenadas geograficas (branco)
     if lat is not None and lon is not None:
@@ -468,21 +473,23 @@ def _draw_person_overlay(image, track_data, show_confidence=False):
         
         text_data.append(("ARMADO", armado_color))
         
-        # Mostra confiança apenas se show_confidence=True
-        if show_confidence:
-            current_pct = int(weapon_conf * 100)
-            avg_pct = int(weapon_avg_conf * 100)
-            peak_pct = int(weapon_peak_conf * 100)
-            
-            if temporal_voting_active:
-                # Sistema usa temporal voting - mostra current/avg/peak
-                text_data.append((f"Confiança: {current_pct}%/{avg_pct}%/{peak_pct}%", color_text_weapon))
-            elif weapon_lost:
-                text_data.append((f"Confiança: {current_pct}% (?)", color_text_weapon))
-            else:
-                # Sem temporal voting - mostra apenas confianca atual
-                text_data.append((f"Confiança: {current_pct}%", color_text_weapon))
+        # Always show weapon confidence
+        current_pct = int(weapon_conf * 100)
+        avg_pct = int(weapon_avg_conf * 100)
+        peak_pct = int(weapon_peak_conf * 100)
+        
+        if temporal_voting_active:
+            text_data.append((f"Weapon Conf: {current_pct}%/{avg_pct}%/{peak_pct}%", color_text_weapon))
+        elif weapon_lost:
+            text_data.append((f"Weapon Conf: {current_pct}% (?)", color_text_weapon))
+        else:
+            text_data.append((f"Weapon Conf: {current_pct}%", color_text_weapon))
     
+    # Append any extra lines (e.g. fused stats from dual-drone pipeline)
+    if extra_lines:
+        for line_text, line_color in extra_lines:
+            text_data.append((line_text, line_color))
+
     # calcula dimensoes do background com escala
     num_lines = len(text_data)
     if num_lines > 0:
@@ -527,7 +534,7 @@ def _draw_person_overlay(image, track_data, show_confidence=False):
     
     return image, text_values
 
-def draw_bbox(frame, tracks, show_confidence=False):
+def draw_bbox(frame, tracks, show_confidence=False, tracks_extra_lines=None):
     """
     Desenha bounding boxes e informações nos tracks.
     
@@ -535,6 +542,8 @@ def draw_bbox(frame, tracks, show_confidence=False):
         frame: imagem do frame
         tracks: lista de tracks
         show_confidence: se True, mostra confiança de arma (default: False)
+        tracks_extra_lines: optional dict mapping track index -> list of (text, color) tuples
+                           to append inside each track's bbox overlay.
     """
     if frame is None or not tracks:
         return frame
@@ -542,15 +551,19 @@ def draw_bbox(frame, tracks, show_confidence=False):
     image = frame.copy()
     text_values = []
     
+    tracks_extra_lines = tracks_extra_lines or {}
+    
     # processa cada track
-    for track in tracks:
+    for idx, track in enumerate(tracks):
         track_data = _extract_track_data(track)
         
         if track_data is None or track_data['lost']:
             continue
         
+        extra = tracks_extra_lines.get(idx)
+        
         # desenha overlay da pessoa (apenas bbox e texto, sem weapon bbox)
-        image, person_texts = _draw_person_overlay(image, track_data, show_confidence)
+        image, person_texts = _draw_person_overlay(image, track_data, show_confidence, extra_lines=extra)
         text_values.extend(person_texts)
     
     # desenha todos os textos com PIL (alta qualidade)

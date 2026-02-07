@@ -95,6 +95,28 @@ def main():
     parser.add_argument('--association-threshold', type=float, default=100.0,
                        help='Distance threshold (meters) for associating detections across drones (default: 100.0)')
 
+    parser.add_argument(
+        '--device',
+        default='auto',
+        help=(
+            "Device for inference: 'auto' (default), 'cpu', 'cuda', 'cuda:0', or a GPU index like '0'. "
+            "Note: GPU will only be used if your installed PyTorch has CUDA enabled."
+        ),
+    )
+
+    parser.add_argument(
+        '--angle',
+        default=None,
+        help=(
+            'Process only a single angle subfolder (e.g., 90). '
+            'Useful when inputs are organized as inputs/samples/droneX/<angle>/(samples...). '
+            'In dual-drone mode, this filters to only the matching common angle.'
+        ),
+    )
+
+    parser.add_argument('--ground-plane-plot', action='store_true',
+                        help='Write a 2D ground-plane (local XY) plot per sample (dual-drone mode only)')
+
     parser.add_argument('--show-weapon-confidence', action='store_true',
                         help='Show weapon confidence text in overlays (default: False)')
 
@@ -105,6 +127,45 @@ def main():
     
     args = parser.parse_args()
 
+    logger = logging.getLogger(__name__)
+
+    def _log_torch_diagnostics():
+        try:
+            import torch  # type: ignore
+
+            cuda_avail = bool(getattr(torch, 'cuda', None) and torch.cuda.is_available())
+            logger.info("torch=%s cuda_available=%s", getattr(torch, '__version__', 'unknown'), cuda_avail)
+            if cuda_avail:
+                try:
+                    n = torch.cuda.device_count()
+                    names = []
+                    for i in range(n):
+                        try:
+                            names.append(torch.cuda.get_device_name(i))
+                        except Exception:
+                            names.append(f"cuda:{i}")
+                    logger.info("cuda_device_count=%s cuda_devices=%s", n, names)
+                except Exception as e:
+                    logger.info("cuda_device_query_failed=%s", e)
+        except Exception as e:
+            logger.info("torch_diagnostics_unavailable=%s", e)
+
+    def _resolve_device(device_str: str):
+        d = (device_str or '').strip().lower()
+        if d in ('', 'none'):
+            return None
+        if d == 'auto':
+            try:
+                import torch  # type: ignore
+
+                if getattr(torch, 'cuda', None) and torch.cuda.is_available():
+                    return 'cuda:0'
+                return 'cpu'
+            except Exception:
+                return None
+        # Accept 'cpu', 'cuda', 'cuda:0', or a GPU id like '0'
+        return device_str
+
     # Configure logging early so constructor logs are captured.
     log_level = _parse_log_level(args.log_level)
     log_dir = Path(args.log_dir) if args.log_dir else (Path(args.output) / "logs")
@@ -114,6 +175,25 @@ def main():
     restore_console, console_fh = _tee_console_to_file(console_log_path)
     
     try:
+        _log_torch_diagnostics()
+        effective_device = _resolve_device(args.device)
+
+        # If user explicitly asked for CUDA but it's not available, make it obvious.
+        if isinstance(args.device, str) and args.device.strip().lower().startswith('cuda'):
+            try:
+                import torch  # type: ignore
+                if not (getattr(torch, 'cuda', None) and torch.cuda.is_available()):
+                    logger.warning(
+                        "You requested --device=%s but torch.cuda.is_available() is False. "
+                        "This usually means you installed a CPU-only PyTorch build.",
+                        args.device,
+                    )
+            except Exception:
+                logger.warning(
+                    "You requested --device=%s but PyTorch diagnostics failed to import. "
+                    "GPU usage cannot be verified.",
+                    args.device,
+                )
         # Handle crop saving logic
         save_crops = args.save_crops and not args.no_crops
         
@@ -143,6 +223,48 @@ def main():
         elif not os.path.exists(input_dir):
             logging.getLogger(__name__).error("Input directory not found: %s", input_dir)
             return 1
+
+        # Optional: pick a single angle subfolder when the input contains numeric angle directories.
+        # This mainly helps when passing --input inputs/samples/drone1 and wanting only 90.
+        if args.angle and (not args.dual_drone):
+            try:
+                angle_requested_int = int(str(args.angle).strip())
+            except Exception:
+                angle_requested_int = None
+
+            if os.path.isdir(input_dir) and angle_requested_int is not None:
+                try:
+                    angle_subdirs = [
+                        d for d in os.listdir(input_dir)
+                        if os.path.isdir(os.path.join(input_dir, d)) and d.isdigit()
+                    ]
+                except Exception:
+                    angle_subdirs = []
+
+                if angle_subdirs:
+                    # Prefer exact match; else match by integer value (handles 09 vs 9).
+                    chosen = None
+                    if str(args.angle) in angle_subdirs:
+                        chosen = str(args.angle)
+                    else:
+                        for d in angle_subdirs:
+                            try:
+                                if int(d) == angle_requested_int:
+                                    chosen = d
+                                    break
+                            except Exception:
+                                continue
+
+                    if chosen is None:
+                        logging.getLogger(__name__).error(
+                            "Requested --angle %s not found under input directory %s (available: %s)",
+                            args.angle,
+                            input_dir,
+                            ", ".join(sorted(angle_subdirs))
+                        )
+                        return 1
+
+                    input_dir = os.path.join(input_dir, chosen)
     
         
         # Create output directory
@@ -168,7 +290,8 @@ def main():
                 enable_weapon_detection=enable_weapons,
                 weapon_confidence_threshold=args.weapon_confidence,
                 sample_majority_threshold=args.sample_majority_threshold,
-                association_threshold=args.association_threshold
+                association_threshold=args.association_threshold,
+                device=effective_device,
             )
             
             # Set crop saving preference
@@ -176,13 +299,15 @@ def main():
             pipeline.show_weapon_confidence = bool(args.show_weapon_confidence)
             pipeline.pipeline_drone1.show_weapon_confidence = bool(args.show_weapon_confidence)
             pipeline.pipeline_drone2.show_weapon_confidence = bool(args.show_weapon_confidence)
+
+            pipeline.enable_ground_plane_plot = bool(args.ground_plane_plot)
             
             # Process dual-drone samples
             pipeline.process_dual_drone_samples(
                 args.input_drone1,
                 args.input_drone2,
                 args.output,
-                #filter_clips=args.filter_clips
+                only_angle=args.angle,
             )
 
             # Print statistics summary
@@ -203,6 +328,7 @@ def main():
             enable_weapon_detection=enable_weapons,
             weapon_confidence_threshold=args.weapon_confidence,
             sample_majority_threshold=args.sample_majority_threshold,
+            device=effective_device,
         )
         
         # Set crop saving preference

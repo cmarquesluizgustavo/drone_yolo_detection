@@ -7,7 +7,7 @@ from ultralytics import YOLO
 
 
 class WeaponDetector:
-    def __init__(self, model_path: str = None, weapon_confidence_threshold: float = 0.5):
+    def __init__(self, model_path: str = None, weapon_confidence_threshold: float = 0.5, device=None):
         if model_path is None:
             current_dir = Path(__file__).parent
             model_path = current_dir.parent / "models" / "weapons" / "best.pt"
@@ -16,6 +16,7 @@ class WeaponDetector:
         self.weapon_confidence_threshold = weapon_confidence_threshold
         self.weapon_class_id = 0
         self.logger = logging.getLogger(__name__)
+        self.device = device
 
         try:
             self.model = YOLO(str(self.model_path))
@@ -42,7 +43,10 @@ class WeaponDetector:
 
     def detect_weapons(self, image):
         try:
-            results = self.model(image, conf=self.weapon_confidence_threshold, iou=0.4, verbose=False)
+            infer_kwargs = dict(conf=self.weapon_confidence_threshold, iou=0.4, verbose=False)
+            if self.device is not None:
+                infer_kwargs["device"] = self.device
+            results = self.model(image, **infer_kwargs)
 
             annotated_image = image.copy()
             weapon_crops = []

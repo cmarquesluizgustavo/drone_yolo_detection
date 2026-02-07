@@ -122,6 +122,7 @@ class Camera:
                             self.lon = float(value)
                     except ValueError:
                         continue
+
             return True
         except Exception as e:
             print(f"Error loading telemetry from {txt_path}: {e}")

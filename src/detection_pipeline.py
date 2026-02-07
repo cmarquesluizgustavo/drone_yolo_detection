@@ -12,15 +12,22 @@ CROP_MIN_SIZE = 32
 class DetectionPipeline:
     """Pipeline for batch processing images with people and weapon detection."""
     
-    def __init__(self, model_path: str, person_confidence_threshold: float = 0.5, 
-                 enable_weapon_detection: bool = True, weapon_confidence_threshold: float = 0.5, 
-                 sample_majority_threshold: int = 1):
+    def __init__(
+        self,
+        model_path: str,
+        person_confidence_threshold: float = 0.5,
+        enable_weapon_detection: bool = True,
+        weapon_confidence_threshold: float = 0.5,
+        sample_majority_threshold: int = 1,
+        device=None,
+    ):
         # Initialize the core detector
         self.detector = PeopleDetector(
             model_path=model_path,
             person_confidence_threshold=person_confidence_threshold,
             enable_weapon_detection=enable_weapon_detection,
-            weapon_confidence_threshold=weapon_confidence_threshold
+            weapon_confidence_threshold=weapon_confidence_threshold,
+            device=device,
         )
         
         # Initialize statistics tracker with majority threshold

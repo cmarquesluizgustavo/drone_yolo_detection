@@ -49,6 +49,20 @@ _PITCH_RMSE_RE = re.compile(r"^\s*PITCH-BASED RMSE:\s*(?P<rmse>[-+]?(?:\d+\.\d+|
 _FUSED_GEO_RMSE_RE = re.compile(
     r"^\s*FUSED-GEO DISTANCE RMSE:\s*(?P<rmse>[-+]?(?:\d+\.\d+|\d+))m\b.*$"
 )
+_FUSED_GEO_RMSE_D1_RE = re.compile(
+    r"^\s*FUSED-GEO DISTANCE RMSE \(D1\):\s*(?P<rmse>[-+]?(?:\d+\.\d+|\d+))m\b.*$"
+)
+_FUSED_GEO_RMSE_D2_RE = re.compile(
+    r"^\s*FUSED-GEO DISTANCE RMSE \(D2\):\s*(?P<rmse>[-+]?(?:\d+\.\d+|\d+))m\b.*$"
+)
+
+_FUSION_GAIN_HDR_RE = re.compile(r"^\s*FUSION LOCALIZATION GAIN:\s*$")
+_FUSION_GAIN_BY_COMBO_HDR_RE = re.compile(r"^\s*FUSION GAIN BY \(DISTANCE, HEIGHT\):\s*$")
+_FUSION_GAIN_VS_RE = re.compile(
+    r"^\s*VS\s+(?P<base>D1|D2):\s*base_rmse=(?P<base_rmse>[-+]?(?:\d+\.\d+|\d+))m,\s*"
+    r"fused_rmse=(?P<fused_rmse>[-+]?(?:\d+\.\d+|\d+))m,\s*gain=(?P<gain>[-+]?(?:\d+\.\d+|\d+))m,\s*"
+    r"gain_pct=(?P<pct>[-+]?(?:\d+\.\d+|\d+))%\s*$"
+)
 
 _TOTAL_IMAGES_PROCESSED_RE = re.compile(r"^\s*Total images processed:\s*(?P<count>\d+)\s*$")
 _TOTAL_SAMPLES_PROCESSED_RE = re.compile(r"^\s*Total samples processed:\s*(?P<count>\d+)\s*$")
@@ -161,6 +175,12 @@ class SetupMetrics:
     rmse_by_combo_m: Dict[str, float] = field(default_factory=dict)  # key: 'distance,height' like '5.0,2.0'
     rmse_pinhole_by_combo_m: Dict[str, float] = field(default_factory=dict)  # parsed from PINHOLE RMSE BY ...
     fused_geo_rmse_m: Optional[float] = None
+    fused_geo_rmse_d1_m: Optional[float] = None
+    fused_geo_rmse_d2_m: Optional[float] = None
+
+    # Fusion gain (stored under the Fused setup)
+    fusion_gain_overall: Dict[str, Dict[str, float]] = field(default_factory=dict)  # {'D1': {...}, 'D2': {...}}
+    fusion_gain_by_combo: Dict[str, Dict[str, Dict[str, float]]] = field(default_factory=dict)  # {'dist,height': {'D1': {...}, 'D2': {...}}}
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -173,6 +193,10 @@ class SetupMetrics:
             "rmse_by_combo_m": self.rmse_by_combo_m,
             "rmse_pinhole_by_combo_m": self.rmse_pinhole_by_combo_m,
             "fused_geo_rmse_m": self.fused_geo_rmse_m,
+            "fused_geo_rmse_d1_m": self.fused_geo_rmse_d1_m,
+            "fused_geo_rmse_d2_m": self.fused_geo_rmse_d2_m,
+            "fusion_gain_overall": self.fusion_gain_overall,
+            "fusion_gain_by_combo": self.fusion_gain_by_combo,
         }
 
 
@@ -229,6 +253,10 @@ def summarize_log_file(path: Path) -> LogSummary:
     in_rmse_methods: bool = False
     current_combo_key: Optional[str] = None
 
+    in_fusion_gain: bool = False
+    in_fusion_gain_by_combo: bool = False
+    fusion_combo_key: Optional[str] = None
+
     # Per-sample tracking (within an angle).
     current_sample_total_frames: Optional[int] = None
 
@@ -249,6 +277,9 @@ def summarize_log_file(path: Path) -> LogSummary:
                 rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
+                in_fusion_gain = False
+                in_fusion_gain_by_combo = False
+                fusion_combo_key = None
                 continue
 
             m = _FOUND_PAIRS_RE.match(line.strip())
@@ -334,6 +365,9 @@ def summarize_log_file(path: Path) -> LogSummary:
                 rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
+                in_fusion_gain = False
+                in_fusion_gain_by_combo = False
+                fusion_combo_key = None
                 continue
 
             if _PER_SAMPLE_METRICS_HDR_RE.match(line):
@@ -342,6 +376,9 @@ def summarize_log_file(path: Path) -> LogSummary:
                 rmse_combo_target = "primary"
                 in_rmse_methods = False
                 current_combo_key = None
+                in_fusion_gain = False
+                in_fusion_gain_by_combo = False
+                fusion_combo_key = None
                 continue
 
             if _PER_SAMPLE_BY_CLASS_HDR_RE.match(line):
@@ -355,6 +392,16 @@ def summarize_log_file(path: Path) -> LogSummary:
             m = _FUSED_GEO_RMSE_RE.match(line)
             if m:
                 setup_metrics.fused_geo_rmse_m = float(m.group("rmse"))
+                continue
+
+            m = _FUSED_GEO_RMSE_D1_RE.match(line)
+            if m:
+                setup_metrics.fused_geo_rmse_d1_m = float(m.group("rmse"))
+                continue
+
+            m = _FUSED_GEO_RMSE_D2_RE.match(line)
+            if m:
+                setup_metrics.fused_geo_rmse_d2_m = float(m.group("rmse"))
                 continue
 
             m = _OVERALL_DISTANCE_RMSE_RE.match(line)
@@ -383,7 +430,48 @@ def summarize_log_file(path: Path) -> LogSummary:
                 in_rmse_combo = False
                 current_metric_scope = None
                 current_combo_key = None
+                in_fusion_gain = False
+                in_fusion_gain_by_combo = False
+                fusion_combo_key = None
                 continue
+
+            if _FUSION_GAIN_HDR_RE.match(line):
+                in_fusion_gain = True
+                in_fusion_gain_by_combo = False
+                fusion_combo_key = None
+                continue
+
+            if _FUSION_GAIN_BY_COMBO_HDR_RE.match(line):
+                in_fusion_gain = True
+                in_fusion_gain_by_combo = True
+                fusion_combo_key = None
+                continue
+
+            if in_fusion_gain and in_fusion_gain_by_combo:
+                m = _RMSE_COMBO_RE.match(line)
+                if m:
+                    dist = float(m.group("distance"))
+                    height = float(m.group("height"))
+                    fusion_combo_key = f"{dist},{height}"
+                    setup_metrics.fusion_gain_by_combo.setdefault(fusion_combo_key, {})
+                    continue
+
+            if in_fusion_gain:
+                m = _FUSION_GAIN_VS_RE.match(line)
+                if m:
+                    base = m.group("base")
+                    payload = {
+                        "base_rmse_m": float(m.group("base_rmse")),
+                        "fused_rmse_m": float(m.group("fused_rmse")),
+                        "gain_m": float(m.group("gain")),
+                        "gain_pct": float(m.group("pct")),
+                    }
+                    if in_fusion_gain_by_combo and fusion_combo_key is not None:
+                        setup_metrics.fusion_gain_by_combo.setdefault(fusion_combo_key, {})
+                        setup_metrics.fusion_gain_by_combo[fusion_combo_key][base] = payload
+                    else:
+                        setup_metrics.fusion_gain_overall[base] = payload
+                    continue
 
             if in_rmse_combo:
                 m = _RMSE_COMBO_RE.match(line)
@@ -513,205 +601,389 @@ def _fmt_metric(value: Any, decimals: int = 3) -> str:
     return str(value)
 
 
+def _bold_row(cells: List[str]) -> str:
+    return " & ".join(f"\\textbf{{{c}}}" for c in cells) + r" \\"
+
+
+def _row(cells: List[str], bold: bool = False) -> str:
+    if bold:
+        return _bold_row(cells)
+    return " & ".join(cells) + r" \\"
+
+
 def render_latex_tables(summaries: List[LogSummary]) -> str:
-    """Render LaTeX tables for the provided summaries.
+    """Render LaTeX tables matching the analyze_log.py output format.
 
-    Produces:
-    - Detection table (frame + sample levels), with angle encoded in Setup.
-    - RMSE table (combo pitch-based + overall methods), grouped by angle.
+    Produces the same 12 table types as analyze_log.render_latex:
+    1.  Detection performance (frame-level)
+    2.  Detection performance (sample-level)
+    3.  Fused detection summary
+    4.  Overall RMSE (pinhole vs pitch)
+    5.  RMSE by (distance, height) — pitch-based
+    6.  RMSE by (distance, height) — pinhole
+    7.  RMSE by (class, distance, height) — pitch-based  (skipped if data unavailable)
+    8.  Fused-geo RMSE
+    9.  Fused-geo RMSE by (distance, height)  (from fusion gain combos)
+    10. Fusion localization gain
+    11. Confusion matrices (frame & sample)
+    12. Detection by (distance, height) per setup  (skipped if data unavailable)
     """
+    tables: List[str] = []
 
-    # For now, merge across log files by just concatenating rows per (log, angle).
-    det_rows: List[str] = []
-    rmse_rows: List[str] = []
-
+    # Collect all (angle_deg, setups_dict) across summaries
+    all_angle_setups: List[Tuple[int, Dict[str, SetupMetrics]]] = []
     for s in summaries:
         for angle_deg, setups in sorted(s.metrics.items()):
-            for setup_name in ["Drone 1", "Drone 2", "Fused"]:
-                if setup_name not in setups:
+            all_angle_setups.append((angle_deg, setups))
+
+    # ── Helper: get metrics dict for a level ──
+    def _level_dict(m: SetupMetrics, level: str) -> Dict[str, Any]:
+        return m.overall if level == "frame" else m.per_sample
+
+    # ── Helper: build a detection metrics table ──
+    def _det_table(level: str, caption: str, label: str):
+        rows = []
+        for angle_deg, setups in all_angle_setups:
+            for sname in ["Drone 1", "Drone 2", "Fused"]:
+                if sname not in setups:
                     continue
-                m = setups[setup_name]
-                setup_label = _latex_escape(f"{setup_name} ({angle_deg}°)")
-
-                def total_from(d: Dict[str, Any]) -> Optional[int]:
-                    try:
-                        tp = int(d.get("TP"))
-                        tn = int(d.get("TN"))
-                        fp = int(d.get("FP"))
-                        fn = int(d.get("FN"))
-                        return tp + tn + fp + fn
-                    except Exception:
-                        return None
-
-                if m.overall:
-                    total = m.total_images_processed if m.total_images_processed is not None else total_from(m.overall)
-                    det_rows.append(
-                        " ".join(
-                            [
-                                "Frame",
-                                "&",
-                                setup_label,
-                                "&",
-                                _fmt_metric(m.overall.get("Accuracy")),
-                                "&",
-                                _fmt_metric(m.overall.get("Precision")),
-                                "&",
-                                _fmt_metric(m.overall.get("Recall")),
-                                "&",
-                                _fmt_metric(m.overall.get("F1-Score")),
-                                "&",
-                                _fmt_metric(m.overall.get("TP"), decimals=0),
-                                "&",
-                                _fmt_metric(m.overall.get("FP"), decimals=0),
-                                "&",
-                                _fmt_metric(m.overall.get("FN"), decimals=0),
-                                "&",
-                                _fmt_metric(m.overall.get("TN"), decimals=0),
-                                "&",
-                                _fmt_metric(total, decimals=0),
-                                r"\\",
-                            ]
-                        )
-                    )
-
-                if m.per_sample:
-                    total = m.total_samples_processed if m.total_samples_processed is not None else total_from(m.per_sample)
-                    det_rows.append(
-                        " ".join(
-                            [
-                                "Sample",
-                                "&",
-                                setup_label,
-                                "&",
-                                _fmt_metric(m.per_sample.get("Accuracy")),
-                                "&",
-                                _fmt_metric(m.per_sample.get("Precision")),
-                                "&",
-                                _fmt_metric(m.per_sample.get("Recall")),
-                                "&",
-                                _fmt_metric(m.per_sample.get("F1-Score")),
-                                "&",
-                                _fmt_metric(m.per_sample.get("TP"), decimals=0),
-                                "&",
-                                _fmt_metric(m.per_sample.get("FP"), decimals=0),
-                                "&",
-                                _fmt_metric(m.per_sample.get("FN"), decimals=0),
-                                "&",
-                                _fmt_metric(m.per_sample.get("TN"), decimals=0),
-                                "&",
-                                _fmt_metric(total, decimals=0),
-                                r"\\",
-                            ]
-                        )
-                    )
-
-            # RMSE rows: by (distance,height) combos using Drone 1 and Drone 2.
-            d1 = setups.get("Drone 1")
-            d2 = setups.get("Drone 2")
-            if d1 and d2:
-                # combo keys like '5.0,2.0'
-                common_combo_keys = sorted(set(d1.rmse_by_combo_m.keys()) & set(d2.rmse_by_combo_m.keys()))
-                for ck in common_combo_keys:
-                    dist_s, height_s = ck.split(",")
-                    rmse_rows.append(
-                        " ".join(
-                            [
-                                "Pitch-based",
-                                "&",
-                                str(angle_deg),
-                                "&",
-                                dist_s,
-                                "&",
-                                height_s,
-                                "&",
-                                _fmt_metric(d1.rmse_by_combo_m.get(ck)),
-                                "&",
-                                _fmt_metric(d2.rmse_by_combo_m.get(ck)),
-                                r"\\",
-                            ]
-                        )
-                    )
-
-                # Overall method comparison, if present.
-                if "pinhole" in d1.rmse_methods_m and "pinhole" in d2.rmse_methods_m:
-                    rmse_rows.append(
-                        " ".join(
-                            [
-                                "Pinhole (overall)",
-                                "&",
-                                str(angle_deg),
-                                "&",
-                                "all",
-                                "&",
-                                "all",
-                                "&",
-                                _fmt_metric(d1.rmse_methods_m.get("pinhole")),
-                                "&",
-                                _fmt_metric(d2.rmse_methods_m.get("pinhole")),
-                                r"\\",
-                            ]
-                        )
-                    )
-                if "pitch" in d1.rmse_methods_m and "pitch" in d2.rmse_methods_m:
-                    rmse_rows.append(
-                        " ".join(
-                            [
-                                "Pitch-based (overall)",
-                                "&",
-                                str(angle_deg),
-                                "&",
-                                "all",
-                                "&",
-                                "all",
-                                "&",
-                                _fmt_metric(d1.rmse_methods_m.get("pitch")),
-                                "&",
-                                _fmt_metric(d2.rmse_methods_m.get("pitch")),
-                                r"\\",
-                            ]
-                        )
-                    )
-
-    det_table = "\n".join(
-        [
+                d = _level_dict(setups[sname], level)
+                if not d:
+                    continue
+                setup_label = _latex_escape(f"{sname} ({angle_deg}°)")
+                is_fused = sname == "Fused"
+                cells = [
+                    setup_label,
+                    _fmt_metric(d.get("Accuracy")),
+                    _fmt_metric(d.get("Precision")),
+                    _fmt_metric(d.get("Recall")),
+                    _fmt_metric(d.get("F1-Score")),
+                ]
+                rows.append(_row(cells, bold=is_fused))
+            rows.append(r"\hline")
+        return "\n".join([
             r"\begin{table}[ht]",
             r"\centering",
-            r"\caption{Detection performance at frame and sample levels for single-UAV and fused configurations.}",
-            r"\label{tab:detection_combined}",
+            f"\\caption{{{caption}}}",
+            f"\\label{{{label}}}",
             r"\resizebox{\columnwidth}{!}{%",
-            r"\begin{tabular}{l l c c c c c c c c c}",
+            r"\begin{tabular}{l c c c c}",
             r"\hline",
-            r"\textbf{Level} & \textbf{Setup} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{TP} & \textbf{FP} & \textbf{FN} & \textbf{TN} & \textbf{Total} \\",
+            r"\textbf{Setup} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} \\",
             r"\hline",
-            r"\hline",
-            *(det_rows if det_rows else [r"% (no metrics found)"]),
-            r"\hline",
+            *rows,
             r"\end{tabular}%",
             r"}",
             r"\end{table}",
-        ]
-    )
+        ])
 
-    rmse_table = "\n".join(
-        [
+    # ── Helper: confusion matrix table ──
+    def _cm_table(level: str, caption: str, label: str):
+        rows = []
+        for angle_deg, setups in all_angle_setups:
+            for sname in ["Drone 1", "Drone 2", "Fused"]:
+                if sname not in setups:
+                    continue
+                m = setups[sname]
+                d = _level_dict(m, level)
+                if not d:
+                    continue
+                setup_label = _latex_escape(f"{sname} ({angle_deg}°)")
+                is_fused = sname == "Fused"
+                tp = d.get("TP", 0)
+                fp = d.get("FP", 0)
+                fn = d.get("FN", 0)
+                tn = d.get("TN", 0)
+                if level == "frame":
+                    total = m.total_images_processed if m.total_images_processed is not None else (tp + tn + fp + fn)
+                else:
+                    total = m.total_samples_processed if m.total_samples_processed is not None else (tp + tn + fp + fn)
+                cells = [
+                    setup_label,
+                    _fmt_metric(tp, 0), _fmt_metric(fp, 0),
+                    _fmt_metric(fn, 0), _fmt_metric(tn, 0),
+                    _fmt_metric(total, 0),
+                ]
+                rows.append(_row(cells, bold=is_fused))
+            rows.append(r"\hline")
+        return "\n".join([
             r"\begin{table}[ht]",
             r"\centering",
-            r"\caption{RMSE (meters) by distance, altitude, viewing angle, and estimator.}",
-            r"\label{tab:rmse_detailed}",
+            f"\\caption{{{caption}}}",
+            f"\\label{{{label}}}",
             r"\resizebox{\columnwidth}{!}{%",
             r"\begin{tabular}{l c c c c c}",
             r"\hline",
-            r"\textbf{Estimator} & \textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Drone 1} & \textbf{Drone 2} \\",
+            r"\textbf{Setup} & \textbf{TP} & \textbf{FP} & \textbf{FN} & \textbf{TN} & \textbf{Total} \\",
             r"\hline",
-            *(rmse_rows if rmse_rows else [r"% (no RMSE data found)\\"]),
+            r"\hline",
+            *rows,
+            r"\end{tabular}%",
+            r"}",
+            r"\end{table}",
+        ])
+
+    # 1. Detection performance (frame-level)
+    tables.append(_det_table(
+        "frame",
+        "Detection performance (frame-level).",
+        "tab:detection_frame_metrics",
+    ))
+
+    # 2. Detection performance (sample-level)
+    tables.append(_det_table(
+        "sample",
+        "Detection performance (sample-level).",
+        "tab:detection_sample_metrics",
+    ))
+
+    # 3. Fused detection summary
+    fused_rows = []
+    for angle_deg, setups in all_angle_setups:
+        if "Fused" not in setups:
+            continue
+        m = setups["Fused"]
+        if m.overall:
+            fused_rows.append(_row([
+                "Frame", str(angle_deg),
+                _fmt_metric(m.overall.get("Accuracy")),
+                _fmt_metric(m.overall.get("Precision")),
+                _fmt_metric(m.overall.get("Recall")),
+                _fmt_metric(m.overall.get("F1-Score")),
+            ]))
+        if m.per_sample:
+            fused_rows.append(_row([
+                "Sample", str(angle_deg),
+                _fmt_metric(m.per_sample.get("Accuracy")),
+                _fmt_metric(m.per_sample.get("Precision")),
+                _fmt_metric(m.per_sample.get("Recall")),
+                _fmt_metric(m.per_sample.get("F1-Score")),
+            ]))
+    tables.append("\n".join([
+        r"\begin{table}[ht]",
+        r"\centering",
+        r"\caption{Fused detection performance summary across viewing angles.}",
+        r"\label{tab:detection_fused_summary}",
+        r"\resizebox{\columnwidth}{!}{%",
+        r"\begin{tabular}{l c c c c c}",
+        r"\hline",
+        r"\textbf{Level} & \textbf{Angle (°)} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} \\",
+        r"\hline",
+        *fused_rows,
+        r"\hline",
+        r"\end{tabular}%",
+        r"}",
+        r"\end{table}",
+    ]))
+
+    # 4. Overall RMSE table
+    rmse_rows = []
+    for angle_deg, setups in all_angle_setups:
+        d1 = setups.get("Drone 1")
+        d2 = setups.get("Drone 2")
+        if not d1 or not d2:
+            continue
+        for est_label, key in [("Pinhole (overall)", "pinhole"), ("Pitch-based (overall)", "pitch")]:
+            r_d1 = d1.rmse_methods_m.get(key)
+            r_d2 = d2.rmse_methods_m.get(key)
+            is_pitch = "Pitch" in est_label
+            cells = [_latex_escape(est_label), str(angle_deg), _fmt_metric(r_d1), _fmt_metric(r_d2)]
+            rmse_rows.append(_row(cells, bold=is_pitch))
+        rmse_rows.append(r"\hline")
+    tables.append("\n".join([
+        r"\begin{table}[ht]",
+        r"\centering",
+        r"\caption{Overall RMSE (meters) comparison between pinhole and pitch-based estimators. Lower is better.}",
+        r"\label{tab:rmse_overall}",
+        r"\resizebox{\columnwidth}{!}{%",
+        r"\begin{tabular}{l c c c}",
+        r"\hline",
+        r"\textbf{Estimator} & \textbf{Angle (°)} & \textbf{Drone 1} & \textbf{Drone 2} \\",
+        r"\hline",
+        *rmse_rows,
+        r"\end{tabular}%",
+        r"}",
+        r"\end{table}",
+    ]))
+
+    # 5. RMSE by (distance, height) — pitch-based
+    rmse_dh_rows = []
+    for angle_deg, setups in all_angle_setups:
+        d1 = setups.get("Drone 1")
+        d2 = setups.get("Drone 2")
+        if not d1 or not d2:
+            continue
+        all_dh = sorted(set(d1.rmse_by_combo_m.keys()) | set(d2.rmse_by_combo_m.keys()))
+        for ck in all_dh:
+            dist_s, height_s = ck.split(",")
+            cells = [str(angle_deg), dist_s, height_s, _fmt_metric(d1.rmse_by_combo_m.get(ck)), _fmt_metric(d2.rmse_by_combo_m.get(ck))]
+            rmse_dh_rows.append(_row(cells))
+        rmse_dh_rows.append(r"\hline")
+
+    if rmse_dh_rows:
+        tables.append("\n".join([
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\caption{Pitch-based RMSE (meters) by distance, altitude, and viewing angle.}",
+            r"\label{tab:rmse_pitch_by_combo}",
+            r"\resizebox{\columnwidth}{!}{%",
+            r"\begin{tabular}{c c c c c}",
+            r"\hline",
+            r"\textbf{Angle (°)} & \textbf{Distance (m)} & \textbf{Height (m)} & \textbf{Drone 1} & \textbf{Drone 2} \\",
+            r"\hline",
+            *rmse_dh_rows,
+            r"\end{tabular}%",
+            r"}",
+            r"\end{table}",
+        ]))
+
+    # 6. RMSE by (distance, height) — pinhole
+    rmse_pin_rows = []
+    for angle_deg, setups in all_angle_setups:
+        d1 = setups.get("Drone 1")
+        d2 = setups.get("Drone 2")
+        if not d1 or not d2:
+            continue
+        all_dh = sorted(set(d1.rmse_pinhole_by_combo_m.keys()) | set(d2.rmse_pinhole_by_combo_m.keys()))
+        for ck in all_dh:
+            dist_s, height_s = ck.split(",")
+            cells = [str(angle_deg), dist_s, height_s, _fmt_metric(d1.rmse_pinhole_by_combo_m.get(ck)), _fmt_metric(d2.rmse_pinhole_by_combo_m.get(ck))]
+            rmse_pin_rows.append(_row(cells))
+        rmse_pin_rows.append(r"\hline")
+
+    if rmse_pin_rows:
+        tables.append("\n".join([
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\caption{Pinhole RMSE (meters) by distance, altitude, and viewing angle.}",
+            r"\label{tab:rmse_pinhole_by_combo}",
+            r"\resizebox{\columnwidth}{!}{%",
+            r"\begin{tabular}{c c c c c}",
+            r"\hline",
+            r"\textbf{Angle (°)} & \textbf{Distance (m)} & \textbf{Height (m)} & \textbf{Drone 1} & \textbf{Drone 2} \\",
+            r"\hline",
+            *rmse_pin_rows,
+            r"\end{tabular}%",
+            r"}",
+            r"\end{table}",
+        ]))
+
+    # 7. RMSE by (class, distance, height) — pitch-based (skipped: data not available in summarize_logs)
+
+    # 8. Fused-geo RMSE table
+    fused_rmse_rows = []
+    for angle_deg, setups in all_angle_setups:
+        fused = setups.get("Fused")
+        if not fused:
+            continue
+        rd1 = fused.fused_geo_rmse_d1_m
+        rd2 = fused.fused_geo_rmse_d2_m
+        if rd1 is not None or rd2 is not None:
+            cells = [str(angle_deg), _fmt_metric(rd1), _fmt_metric(rd2)]
+            fused_rmse_rows.append(_row(cells))
+
+    if fused_rmse_rows:
+        tables.append("\n".join([
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\caption{Fused-geo RMSE (meters): distance from each drone to the triangulated geoposition.}",
+            r"\label{tab:rmse_fused_geo}",
+            r"\resizebox{\columnwidth}{!}{%",
+            r"\begin{tabular}{c c c}",
+            r"\hline",
+            r"\textbf{Angle (°)} & \textbf{D1 $\rightarrow$ Fused} & \textbf{D2 $\rightarrow$ Fused} \\",
+            r"\hline",
+            *fused_rmse_rows,
             r"\hline",
             r"\end{tabular}%",
             r"}",
             r"\end{table}",
-        ]
-    )
+        ]))
 
-    return det_table + "\n\n" + rmse_table + "\n"
+    # 9. Fused-geo RMSE by (distance, height) — from fusion_gain_by_combo data
+    fused_dh_rows = []
+    for angle_deg, setups in all_angle_setups:
+        fused = setups.get("Fused")
+        if not fused or not fused.fusion_gain_by_combo:
+            continue
+        for ck in sorted(fused.fusion_gain_by_combo.keys()):
+            dist_s, height_s = ck.split(",")
+            combo = fused.fusion_gain_by_combo[ck]
+            rd1 = combo.get("D1", {}).get("fused_rmse_m")
+            rd2 = combo.get("D2", {}).get("fused_rmse_m")
+            cells = [str(angle_deg), dist_s, height_s, _fmt_metric(rd1), _fmt_metric(rd2)]
+            fused_dh_rows.append(_row(cells))
+        fused_dh_rows.append(r"\hline")
+
+    if fused_dh_rows:
+        tables.append("\n".join([
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\caption{Fused-geo RMSE (meters) by distance, altitude, and viewing angle.}",
+            r"\label{tab:rmse_fused_geo_by_combo}",
+            r"\resizebox{\columnwidth}{!}{%",
+            r"\begin{tabular}{c c c c c}",
+            r"\hline",
+            r"\textbf{Angle (°)} & \textbf{Distance (m)} & \textbf{Height (m)} & \textbf{D1 $\rightarrow$ Fused} & \textbf{D2 $\rightarrow$ Fused} \\",
+            r"\hline",
+            *fused_dh_rows,
+            r"\end{tabular}%",
+            r"}",
+            r"\end{table}",
+        ]))
+
+    # 10. Fusion localization gain table
+    gain_rows = []
+    for angle_deg, setups in all_angle_setups:
+        fused = setups.get("Fused")
+        if not fused or not fused.fusion_gain_overall:
+            continue
+        for drone_lbl in ["D1", "D2"]:
+            g = fused.fusion_gain_overall.get(drone_lbl)
+            if g is None:
+                continue
+            cells = [
+                str(angle_deg), drone_lbl,
+                _fmt_metric(g.get("base_rmse_m")),
+                _fmt_metric(g.get("fused_rmse_m")),
+                _fmt_metric(g.get("gain_m")),
+                f"{g.get('gain_pct', 0):.1f}\\%",
+            ]
+            gain_rows.append(_row(cells))
+        gain_rows.append(r"\hline")
+
+    if gain_rows:
+        tables.append("\n".join([
+            r"\begin{table}[ht]",
+            r"\centering",
+            r"\caption{Fusion localization gain: RMSE improvement of fused geoposition over single-drone pitch-based estimation.}",
+            r"\label{tab:fusion_gain}",
+            r"\resizebox{\columnwidth}{!}{%",
+            r"\begin{tabular}{c c c c c c}",
+            r"\hline",
+            r"\textbf{Angle (°)} & \textbf{Baseline} & \textbf{Base RMSE (m)} & \textbf{Fused RMSE (m)} & \textbf{Gain (m)} & \textbf{Gain (\%)} \\",
+            r"\hline",
+            *gain_rows,
+            r"\end{tabular}%",
+            r"}",
+            r"\end{table}",
+        ]))
+
+    # 11. Confusion matrices (frame & sample)
+    tables.append(_cm_table(
+        "frame",
+        "Confusion matrix counts (frame-level).",
+        "tab:detection_frame_cm",
+    ))
+    tables.append(_cm_table(
+        "sample",
+        "Confusion matrix counts (sample-level).",
+        "tab:detection_sample_cm",
+    ))
+
+    # 12. Detection by (distance, height) per setup (skipped: per-combo detection data not available in summarize_logs)
+
+    return "\n\n".join(tables) + "\n"
 
 
 def iter_log_files(log_dir: Path, pattern: str) -> List[Path]:
