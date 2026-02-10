@@ -464,26 +464,8 @@ def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=N
     
     # Flag de arma com cor baseada no tipo de deteccao
     if has_weapon:
-        # vermelho: deteccao atual forte (weapon_conf > 40%)
-        # laranja: apenas temporal voting (deteccao temporaria/memoria)
-        if weapon_conf > 0.2:
-            armado_color = color_text_weapon  # (255, 100, 100) vermelho claro
-        else:
-            armado_color = color_text_title   # (226, 135, 67) laranja
-        
-        text_data.append(("ARMADO", armado_color))
-        
-        # Always show weapon confidence
-        current_pct = int(weapon_conf * 100)
-        avg_pct = int(weapon_avg_conf * 100)
-        peak_pct = int(weapon_peak_conf * 100)
-        
-        if temporal_voting_active:
-            text_data.append((f"Weapon Conf: {current_pct}%/{avg_pct}%/{peak_pct}%", color_text_weapon))
-        elif weapon_lost:
-            text_data.append((f"Weapon Conf: {current_pct}% (?)", color_text_weapon))
-        else:
-            text_data.append((f"Weapon Conf: {current_pct}%", color_text_weapon))
+        # Always show weapon confidence (not as percentage)
+        text_data.append((f"Confidence: {weapon_conf:.3f}", color_text_weapon))
     
     # Append any extra lines (e.g. fused stats from dual-drone pipeline)
     if extra_lines:

@@ -112,8 +112,13 @@ def plot_ground_plane(
         fused_xs.append(xy[0])
         fused_ys.append(xy[1])
 
+    import re
     fig, ax = plt.subplots(figsize=(7.5, 7.5), dpi=int(dpi))
-    ax.set_title(title)
+    # Clean up the title: remove (GPS) and extra info, keep only main part
+    clean_title = title
+    # Remove (GPS) and similar
+    clean_title = re.sub(r"\s*\(.*?\)", "", clean_title)
+    ax.set_title(clean_title.strip())
 
     if d1_xs:
         ax.scatter(d1_xs, d1_ys, s=14, alpha=0.8, marker="o", label="targets (drone1)")
@@ -181,7 +186,8 @@ def plot_ground_plane(
 
     series_count = len(drone_xs) + len(d1_xs) + len(d2_xs) + len(fused_xs)
     if series_count > 1:
-        ax.legend(loc="best")
+        # Place legend outside the plot area on the right
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), borderaxespad=0., fontsize=10)
 
     if out_path is not None:
         out_path = Path(out_path)

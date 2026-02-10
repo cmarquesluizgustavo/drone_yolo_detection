@@ -68,7 +68,9 @@ class DualDroneDetectionPipeline:
 
         # Optional: write a 2D ground-plane (local XY) plot per sample.
         self.enable_ground_plane_plot = False
-        self.ground_plane_plot_filename = "ground_plane.png"
+    self.ground_plane_plot_filename = "ground_plane.png"
+    # Position fusion method: 'average', 'rays', or 'circles'
+    self.position_fusion_method = 'average'
 
     def print_console_output(
         self,
@@ -851,7 +853,7 @@ class DualDroneDetectionPipeline:
     def fuse_frame_detections(self, detections1, detections2, weapon_results1, weapon_results2, frame_idx):
         """Fuse detections from two drones using direct geometric triangulation."""
         
-        # Convert to Detection objects for fusion
+    # Convert to Detection objects for fusion (keep existing fields for matching)
         detection_objs1 = []
         for i, det in enumerate(detections1):
             # Get weapon information
@@ -927,59 +929,134 @@ class DualDroneDetectionPipeline:
                 has_weapon=has_weapon,
                 weapon_confidence=weapon_conf
             ))
-        
-        # Prepare measurements for direct triangulation
+        # Prepare measurement groups (used to pair detections across drones)
         measurement_groups = self.fusion.prepare_measurements_for_triangulation(
             detection_objs1, detection_objs2, self.camera_drone1, self.camera_drone2
         )
-        
-        # Use direct geometric triangulation (no temporal filtering)
-        fused_detections = self._direct_triangulation(measurement_groups)
-        
-        # Convert triangulation results to detection format
+
+        import math
+
         fused = []
-        for detection in fused_detections:
-            # Get triangulated position
-            x, y = detection['x'], detection['y']
-            
-            # Convert back to geographic coordinates
-            lat, lon = GeoConverter.xy_to_geo(x, y)
-            
-            # Determine source and bbox info
-            source = 'fused' if len(detection['drone_measurements']) > 1 else f"drone{detection.get('drone_id', 1)}"
-            
-            fused_det = {
-                'source': source,
-                'person_confidence': detection['person_confidence'],
-                'has_weapon': detection['has_weapon'],
-                'weapon_confidence': detection['weapon_confidence'],
-                'fused_geoposition': {
-                    'latitude': lat,
-                    'longitude': lon
-                },
-                'x': x,
-                'y': y,
-                'detection_id': detection['detection_id'],
-            }
-            
-            # Add bounding box information
-            if source == 'fused':
-                fused_det['bbox_drone1'] = detection.get('bbox_drone1')
-                fused_det['bbox_drone2'] = detection.get('bbox_drone2')
+        for det_id, group in enumerate(measurement_groups):
+            measurements = group.get('drone_measurements', [])
+            if not measurements:
+                continue
+
+            # Compute per-measurement XY estimates (uav_x + r*sin(b), uav_y + r*cos(b))
+            est_pts = []
+            for m in measurements:
+                uav_x, uav_y = m['uav_pos']
+                r = float(m.get('distance', 0.0) or 0.0)
+                b_rad = math.radians(float(m.get('bearing', 0.0) or 0.0))
+                x = uav_x + r * math.sin(b_rad)
+                y = uav_y + r * math.cos(b_rad)
+                est_pts.append((x, y))
+
+            fused_x = None
+            fused_y = None
+
+            method = getattr(self, 'position_fusion_method', 'average')
+            if method == 'average' or len(measurements) == 1:
+                # Simple average of estimated XY positions (or single-measurement estimate)
+                xs = [p[0] for p in est_pts]
+                ys = [p[1] for p in est_pts]
+                fused_x = sum(xs) / len(xs)
+                fused_y = sum(ys) / len(ys)
+
+            elif method == 'rays' and len(measurements) >= 2:
+                # Intersect bearing rays (use first two measurements)
+                m1 = measurements[0]
+                m2 = measurements[1]
+                x1, y1 = m1['uav_pos']
+                x2, y2 = m2['uav_pos']
+                b1 = math.radians(float(m1.get('bearing', 0.0) or 0.0))
+                b2 = math.radians(float(m2.get('bearing', 0.0) or 0.0))
+                dx1, dy1 = math.sin(b1), math.cos(b1)
+                dx2, dy2 = math.sin(b2), math.cos(b2)
+                cross = dx1 * dy2 - dy1 * dx2
+                if abs(cross) < 1e-6:
+                    # Nearly parallel -> fallback to average
+                    xs = [p[0] for p in est_pts]
+                    ys = [p[1] for p in est_pts]
+                    fused_x = sum(xs) / len(xs)
+                    fused_y = sum(ys) / len(ys)
+                else:
+                    dx = x2 - x1
+                    dy = y2 - y1
+                    t1 = (dx * dy2 - dy * dx2) / cross
+                    fused_x = x1 + t1 * dx1
+                    fused_y = y1 + t1 * dy1
+
+            elif method == 'circles' and len(measurements) >= 2:
+                # Intersect range circles (use first two measurements)
+                m1 = measurements[0]
+                m2 = measurements[1]
+                x1, y1 = m1['uav_pos']
+                x2, y2 = m2['uav_pos']
+                r1 = float(m1.get('distance', 0.0) or 0.0)
+                r2 = float(m2.get('distance', 0.0) or 0.0)
+                d = math.hypot(x2 - x1, y2 - y1)
+                if d < 1e-6 or d > (r1 + r2) or d < abs(r1 - r2):
+                    # No intersection or degenerate -> fallback to average
+                    xs = [p[0] for p in est_pts]
+                    ys = [p[1] for p in est_pts]
+                    fused_x = sum(xs) / len(xs)
+                    fused_y = sum(ys) / len(ys)
+                else:
+                    a = (r1 * r1 - r2 * r2 + d * d) / (2.0 * d)
+                    h = math.sqrt(max(0.0, r1 * r1 - a * a))
+                    xm = x1 + a * (x2 - x1) / d
+                    ym = y1 + a * (y2 - y1) / d
+                    rx = -(y2 - y1) * (h / d)
+                    ry = (x2 - x1) * (h / d)
+                    xi1 = xm + rx
+                    yi1 = ym + ry
+                    xi2 = xm - rx
+                    yi2 = ym - ry
+                    # Choose the intersection closer to the average of estimates
+                    avg_x = sum([p[0] for p in est_pts]) / len(est_pts)
+                    avg_y = sum([p[1] for p in est_pts]) / len(est_pts)
+                    d1 = (xi1 - avg_x) ** 2 + (yi1 - avg_y) ** 2
+                    d2 = (xi2 - avg_x) ** 2 + (yi2 - avg_y) ** 2
+                    if d1 <= d2:
+                        fused_x, fused_y = xi1, yi1
+                    else:
+                        fused_x, fused_y = xi2, yi2
+
             else:
-                bbox_key = f'bbox_drone{detection.get("drone_id", 1)}'
-                fused_det['bbox'] = detection.get(bbox_key)
-            
-            # Calculate distance and bearing from each drone to fused position
+                # Unknown method - fallback to average
+                xs = [p[0] for p in est_pts]
+                ys = [p[1] for p in est_pts]
+                fused_x = sum(xs) / len(xs)
+                fused_y = sum(ys) / len(ys)
+
+            # Convert XY to lat/lon
+            lat, lon = GeoConverter.xy_to_geo(fused_x, fused_y)
+
+            # Build fused detection
+            fused_det = {
+                'source': 'fused' if len(measurements) > 1 else f"drone{group.get('drone_id', 1)}",
+                'person_confidence': group.get('person_confidence', 0.0),
+                'has_weapon': group.get('has_weapon', False),
+                'weapon_confidence': group.get('weapon_confidence', 0.0),
+                'fused_geoposition': {'latitude': lat, 'longitude': lon},
+                'x': fused_x,
+                'y': fused_y,
+                'detection_id': det_id + 1,
+                'bbox_drone1': group.get('bbox_drone1'),
+                'bbox_drone2': group.get('bbox_drone2'),
+            }
+
+            # Add per-drone distances (optional)
             for cam_id, camera in [(1, self.camera_drone1), (2, self.camera_drone2)]:
                 try:
                     dist = distance_from_geoposition(camera, lat, lon)
                     fused_det[f'distance_drone{cam_id}_m'] = dist
                 except Exception:
                     pass
-            
+
             fused.append(fused_det)
-        
+
         return fused
     
     def _direct_triangulation(self, measurement_groups):
