@@ -35,7 +35,7 @@ class Camera:
         # telemetry/manual
         self.lat = 0.0
         self.lon = 0.0
-        
+
         # Calculate pixel sizes first
         self.pixel_size_x_mm = sensor_width_mm / image_width_px
         self.pixel_size_y_mm = sensor_height_mm / image_height_px
@@ -108,9 +108,6 @@ class Camera:
                     
                     try:
                         if key == 'pitch':
-                            # Telemetry pitch in the raw txt files is typically negative when the
-                            # camera/drone is pitched downward (nose-down). Our geometry assumes
-                            # positive pitch means "tilted down".
                             self.pitch_deg = -float(value)
                         elif key == 'roll':
                             self.roll_deg = float(value)

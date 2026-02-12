@@ -27,19 +27,19 @@ def estimate_bearing(camera, x_pixel):
 
 def target_geoposition(camera, distance_m, bearing_deg):
     # Convert camera position to ground plane
-    cam_x, cam_y = GeoConverter.geo_to_xy(camera.lat, camera.lon)
+    camera_x, camera_y = GeoConverter.geo_to_xy(camera.lat, camera.lon)
     
     # Calculate target position in ground plane
     bearing_rad = math.radians(bearing_deg)
-    x_target = cam_x + distance_m * math.sin(bearing_rad)
-    y_target = cam_y + distance_m * math.cos(bearing_rad)
+    x_target = camera_x + distance_m * math.sin(bearing_rad)
+    y_target = camera_y + distance_m * math.cos(bearing_rad)
     
     # Convert back to geographic coordinates
     lat, lon = GeoConverter.xy_to_geo(x_target, y_target)
     return lat, lon
 
 
-def bearing_from_geoposition(camera, target_lat: float, target_lon: float) -> float:
+def bearing_from_geoposition(camera, target_lat, target_lon):
     camera_x, camera_y = GeoConverter.geo_to_xy(camera.lat, camera.lon)
     target_x, target_y = GeoConverter.geo_to_xy(target_lat, target_lon)
     
@@ -51,8 +51,55 @@ def bearing_from_geoposition(camera, target_lat: float, target_lon: float) -> fl
     return bearing_deg
 
 
-def distance_from_geoposition(camera, target_lat: float, target_lon: float) -> float:
+def distance_from_geoposition(camera, target_lat, target_lon):
     camera_x, camera_y = GeoConverter.geo_to_xy(camera.lat, camera.lon)
     target_x, target_y = GeoConverter.geo_to_xy(target_lat, target_lon)
     
     return float(math.hypot(target_x - camera_x, target_y - camera_y))
+
+
+# --- Fusion/triangulation methods for two UAVs ---
+def fuse_average_target_positions_from_distance_bearing(camera1, dist1, bearing1, camera2, dist2, bearing2):
+    # Compute target positions from each UAV
+    x1, y1 = GeoConverter.geo_to_xy(camera1.lat, camera1.lon)
+    x2, y2 = GeoConverter.geo_to_xy(camera2.lat, camera2.lon)
+    b1_rad = math.radians(bearing1)
+    b2_rad = math.radians(bearing2)
+    xt1 = x1 + dist1 * math.sin(b1_rad)
+    yt1 = y1 + dist1 * math.cos(b1_rad)
+    xt2 = x2 + dist2 * math.sin(b2_rad)
+    yt2 = y2 + dist2 * math.cos(b2_rad)
+    # Average the two positions
+    xt = (xt1 + xt2) / 2.0
+    yt = (yt1 + yt2) / 2.0
+    # Convert back to lat/lon
+    lat, lon = GeoConverter.xy_to_geo(xt, yt)
+    return lat, lon
+
+
+def triangulate_target_by_bearing_intersection(camera1, bearing1, camera2, bearing2):
+    x1, y1 = GeoConverter.geo_to_xy(camera1.lat, camera1.lon)
+    x2, y2 = GeoConverter.geo_to_xy(camera2.lat, camera2.lon)
+    theta1 = math.radians(bearing1)
+    theta2 = math.radians(bearing2)
+    # Line 1: (x1, y1) + t1 * (sin(theta1), cos(theta1))
+    # Line 2: (x2, y2) + t2 * (sin(theta2), cos(theta2))
+    # Solve for intersection:
+    # x1 + t1*sin(theta1) = x2 + t2*sin(theta2)
+    # y1 + t1*cos(theta1) = y2 + t2*cos(theta2)
+    # Rearranged as a linear system:
+    # [sin1, -sin2] [t1] = [x2 - x1]
+    # [cos1, -cos2] [t2]   [y2 - y1]
+    sin1, cos1 = math.sin(theta1), math.cos(theta1)
+    sin2, cos2 = math.sin(theta2), math.cos(theta2)
+    det = sin1 * cos2 - sin2 * cos1
+    if abs(det) < 1e-8:
+        return None  # Lines are parallel or nearly so
+    dx = x2 - x1
+    dy = y2 - y1
+    t1 = (dx * cos2 - dy * sin2) / det
+    # Intersection point
+    xi = x1 + t1 * sin1
+    yi = y1 + t1 * cos1
+    lat, lon = GeoConverter.xy_to_geo(xi, yi)
+    return lat, lon

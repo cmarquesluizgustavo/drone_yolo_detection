@@ -93,18 +93,6 @@ def draw_texts(source_image, values):
 
 
 def tracks_from_detections(detections_info, weapon_results=None, track_id_start=1):
-    """Convert pipeline detections + optional weapon results into viewer track dicts.
-
-    This lets batch pipelines reuse the same overlay code used by tracking mode.
-
-    Args:
-        detections_info: list[dict] with at least 'bbox' in xyxy pixel coords.
-        weapon_results: optional list aligned with detections (per-person crop results).
-        track_id_start: starting id for synthetic track ids.
-
-    Returns:
-        list[dict] compatible with `_extract_track_data` (dict branch).
-    """
 
     tracks = []
     detections_info = detections_info or []
@@ -184,20 +172,6 @@ def draw_info_panel(
     bg_color=(0, 0, 0),
     bg_opacity=0.8,
 ):
-    """Draw a multi-line info panel with translucent background.
-
-    Args:
-        image: BGR image.
-        lines: list of (text, color_bgr) tuples.
-        x, y: anchor position in pixels. For align='left' it's top-left.
-        scale_factor: multiplies font size.
-        align: 'left' or 'center'.
-        bg_color: BGR background fill.
-        bg_opacity: background opacity [0..1].
-
-    Returns:
-        (image, (x1, y1, x2, y2)) panel rectangle.
-    """
     _load_fonts()
 
     if image is None:
@@ -263,7 +237,6 @@ def draw_info_panel(
 
 
 def _extract_track_data(track):
-    """extrai dados do track (suporta PersonTrack e dict)"""
     
     # objeto PersonTrack
     if not isinstance(track, dict):
@@ -390,16 +363,9 @@ def _extract_track_data(track):
             'weapon_bboxes': track.get('weapon_bboxes', []),
             'lost': track.get('lost', False)
         }
-    
-    return None
 
 
-def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=None):
-    """Draw person overlay with optional extra_lines appended inside the bbox info panel.
-    
-    Args:
-        extra_lines: optional list of (text, color_rgb) tuples to append.
-    """
+def _draw_person_overlay(image, track_data, extra_lines=None):
     bbox = track_data['bbox']
     track_id = track_data['track_id']
     distance = track_data['distance']
@@ -407,10 +373,6 @@ def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=N
     lon = track_data['lon']
     has_weapon = track_data['has_weapon']
     weapon_conf = track_data['weapon_confidence']
-    weapon_avg_conf = track_data.get('weapon_avg_confidence', weapon_conf)
-    weapon_peak_conf = track_data.get('weapon_peak_confidence', weapon_conf)
-    temporal_voting_active = track_data.get('temporal_voting_active', False)
-    weapon_lost = track_data.get('weapon_lost', False)
     
     try:
         x1, y1, x2, y2 = map(int, bbox)
@@ -420,92 +382,59 @@ def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=N
         return image, []
     
     text_values = []
-    
-    # determina cor da bbox baseado na confianca da ARMA (weapon)
+
     if has_weapon and weapon_conf > 0.2:
-        # deteccao atual forte - VERMELHO
         bbox_color = (0, 0, 255)
-    elif has_weapon and temporal_voting_active:
-        # apenas temporal voting (memoria) - LARANJA
-        bbox_color = (67, 135, 226)
     else:
         bbox_color = color_rect_person
     
     image_height = image.shape[0]
     resolution_scale = image_height / 720.0
     
-    # calcula escala baseada no tamanho da bbox (maior bbox = texto maior)
-    # tamanho base: 100px de altura = scale 1.0
     bbox_height = h
     bbox_scale = bbox_height / 100.0
     
-    # combina ambas as escalas (resolucao tem peso maior)
-    # minimo: 0.5x, maximo: 2.5x
     scale_factor = max(0.5, min(2.5, resolution_scale * 0.7 + bbox_scale * 0.3))
     scaled_font_size = int(font_size * scale_factor)
     scaled_line_spacing = int((font_size + 3) * scale_factor)
     
-    # desenha apenas a bbox da pessoa (sem box de info, sem linha, sem circulo)
     image = cv2.rectangle(image, (x1, y1), (x2, y2), bbox_color, 2)
     
-    # prepara todas as linhas de texto com suas cores
     text_data = []
     
-    # titulo (laranja)
     text_data.append((f"ID: {track_id}", color_text_title))
-    
-    # distancia (branco)
     if distance is not None:
         text_data.append((f"Distance: {distance:.1f}m", color_text_body))
-    
-    # coordenadas geograficas (branco)
     if lat is not None and lon is not None:
         text_data.append((f"Lat:{lat:.6f} Lon:{lon:.6f}", color_text_body))
-    
-    # Flag de arma com cor baseada no tipo de deteccao
     if has_weapon:
-        # Always show weapon confidence (not as percentage)
         text_data.append((f"Confidence: {weapon_conf:.3f}", color_text_weapon))
-    
-    # Append any extra lines (e.g. fused stats from dual-drone pipeline)
     if extra_lines:
         for line_text, line_color in extra_lines:
             text_data.append((line_text, line_color))
 
-    # calcula dimensoes do background com escala
     num_lines = len(text_data)
     if num_lines > 0:
-        # estima largura maxima do texto (aproximacao com escala)
         max_text_length = max(len(text) for text, _ in text_data)
         bg_width = int(max_text_length * scaled_font_size * 0.6) + int(20 * scale_factor)  # padding escalado
         bg_height = num_lines * scaled_line_spacing + int(10 * scale_factor)  # padding vertical escalado
-        
-        # calcula posicao centralizada em relacao ao topo da bbox
         bbox_center_x = x1 + w // 2
         bg_x1 = bbox_center_x - bg_width // 2
         bg_x2 = bg_x1 + bg_width
-        
-        # posiciona acima da bbox
         bg_y2 = y1 - 5
         bg_y1 = bg_y2 - bg_height
-        
-        # garante que nao saia da tela
         if bg_y1 < 0:
             bg_y1 = 0
             bg_y2 = bg_height
         
-        # desenha background semi-transparente
         overlay = image.copy()
         cv2.rectangle(overlay, (bg_x1, bg_y1), (bg_x2, bg_y2), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.8, image, 0.2, 0, image)  # 80% opacity
 
-        # calcula posicao inicial do texto (no topo do background com padding escalado)
         text_x = bg_x1 + int(10 * scale_factor)
         line_y = bg_y1 + int(5 * scale_factor)  # pequeno padding do topo escalado
         
-        # adiciona todos os textos com escala
         for text, color in text_data:
-            # usa small font se escala for pequena
             use_small = scale_factor < 0.75
             text_values.append([text, text_x, line_y, color, use_small, scale_factor])
             line_y += scaled_line_spacing
@@ -517,16 +446,6 @@ def _draw_person_overlay(image, track_data, show_confidence=False, extra_lines=N
     return image, text_values
 
 def draw_bbox(frame, tracks, show_confidence=False, tracks_extra_lines=None):
-    """
-    Desenha bounding boxes e informações nos tracks.
-    
-    Args:
-        frame: imagem do frame
-        tracks: lista de tracks
-        show_confidence: se True, mostra confiança de arma (default: False)
-        tracks_extra_lines: optional dict mapping track index -> list of (text, color) tuples
-                           to append inside each track's bbox overlay.
-    """
     if frame is None or not tracks:
         return frame
     
@@ -545,7 +464,7 @@ def draw_bbox(frame, tracks, show_confidence=False, tracks_extra_lines=None):
         extra = tracks_extra_lines.get(idx)
         
         # desenha overlay da pessoa (apenas bbox e texto, sem weapon bbox)
-        image, person_texts = _draw_person_overlay(image, track_data, show_confidence, extra_lines=extra)
+        image, person_texts = _draw_person_overlay(image, track_data, extra_lines=extra)
         text_values.extend(person_texts)
     
     # desenha todos os textos com PIL (alta qualidade)
@@ -553,3 +472,82 @@ def draw_bbox(frame, tracks, show_confidence=False, tracks_extra_lines=None):
         image = draw_texts(image, text_values)
     
     return image
+
+def draw_boxes_fusion(image, detections, weapon_results, drone_label, fused_detections=None, drone_id=None, show_confidence=False):
+    tracks = tracks_from_detections(detections, weapon_results, track_id_start=1)
+    
+    # Build extra_lines per track with fused stats
+    tracks_extra_lines = {}
+    if fused_detections and drone_id is not None:
+        bbox_key = f'bbox_drone{drone_id}'
+        for track_idx, det in enumerate(detections):
+            det_bbox = det.get('bbox')
+            if det_bbox is None:
+                continue
+            # Find matching fused detections (both methods)
+            matched_fused = []
+            for fd in fused_detections:
+                fused_bbox = fd.get(bbox_key) or fd.get('bbox')
+                if fused_bbox is not None and list(fused_bbox) == list(det_bbox):
+                    matched_fused.append(fd)
+            if not matched_fused:
+                continue
+            extra = []
+            extra.append(("--- Fused ---", color_text_title))
+            for fd in matched_fused:
+                method = fd.get('source', '')
+                fused_conf = fd.get('person_confidence', 0.0)
+                # Show fused confidence in overlay
+                extra.append((f"Fused Confidence: {fused_conf:.3f}", (0, 0, 255)))
+                extra.append((f"{method} Conf: {fused_conf:.3f}", color_text_body))
+                # Fused positions
+                geo_avg = fd.get('fused_geoposition_average')
+                geo_bi = fd.get('fused_geoposition_bearing_intersection')
+                if geo_avg:
+                    flat = geo_avg.get('latitude', 0.0)
+                    flon = geo_avg.get('longitude', 0.0)
+                    extra.append((f"Avg Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
+                if geo_bi:
+                    flat = geo_bi.get('latitude', 0.0)
+                    flon = geo_bi.get('longitude', 0.0)
+                    extra.append((f"Tri Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
+                # Fused distances (from this drone to each fused position)
+                dist_avg = fd.get(f'distance_drone{drone_id}_average_m')
+                dist_bi = fd.get(f'distance_drone{drone_id}_bearing_intersection_m')
+                if dist_avg is not None:
+                    extra.append((f"Avg Dist: {dist_avg:.1f}m", color_text_body))
+                if dist_bi is not None:
+                    extra.append((f"Tri Dist: {dist_bi:.1f}m", color_text_body))
+                # Fused weapon info
+                fused_has_weapon = fd.get('has_weapon', False)
+                fused_weapon_conf = fd.get('weapon_confidence', 0.0)
+                if fused_has_weapon:
+                    extra.append((f"Fused ARMADO Conf: {fused_weapon_conf:.3f}", color_text_weapon))
+            tracks_extra_lines[track_idx] = extra
+    
+    img_annotated = draw_bbox(
+        image, tracks,
+        show_confidence=show_confidence,
+        tracks_extra_lines=tracks_extra_lines,
+    )
+
+    # Keep a simple top label for the side-by-side fused visualization.
+    cv2.putText(img_annotated, drone_label, (20, 30),
+                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
+    return img_annotated
+
+def fused_visualization(img1, img2):
+    h1, w1 = img1.shape[:2]
+    h2, w2 = img2.shape[:2]
+    
+    # Make heights equal
+    max_h = max(h1, h2)
+    if h1 < max_h:
+        img1 = cv2.copyMakeBorder(img1, 0, max_h - h1, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    if h2 < max_h:
+        img2 = cv2.copyMakeBorder(img2, 0, max_h - h2, 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    
+    # Concatenate horizontally
+    combined = np.hstack([img1, img2])
+
+    return combined

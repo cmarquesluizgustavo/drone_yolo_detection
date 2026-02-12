@@ -1,12 +1,6 @@
-#!/usr/bin/env python3
-"""
-Main script to run people detection pipeline.
-"""
-
 import argparse
 import io
 import logging
-import logging.handlers
 import os
 import sys
 from datetime import datetime

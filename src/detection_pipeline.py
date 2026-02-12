@@ -38,17 +38,6 @@ class DetectionPipeline:
         self.enable_weapon_detection = enable_weapon_detection
         self.show_weapon_confidence = False
 
-        # Optional filter to drop known background/irrelevant people from detections.
-        # This is useful when an unrelated person appears in the background and
-        # would otherwise pollute weapon metrics and distance RMSE.
-        #
-        # Config format (dict):
-        #   {
-        #     'enabled': bool,
-        #     'region': [x1, y1, x2, y2],   # normalized [0..1] image coords
-        #     'min_area_frac': float,       # min bbox area fraction to KEEP (drop smaller)
-        #     'max_area_frac': float,       # max bbox area fraction to KEEP (drop larger)
-        #   }
         self.background_person_filter = {
             'enabled': False,
             'region': None,
@@ -56,14 +45,7 @@ class DetectionPipeline:
             'max_area_frac': None,
         }
 
-    def filter_people_detections(self, detections, image_shape, sample_name=None, frame_path=None):
-        """Filter out known background/irrelevant people based on bbox geometry.
-
-        The filtering happens before:
-        - crops are saved
-        - weapon detection runs
-        - metrics/statistics are updated
-        """
+    def filter_people_detections(self, detections, image_shape):
         cfg = getattr(self, 'background_person_filter', None) or {}
         if not cfg.get('enabled'):
             return detections
@@ -271,7 +253,6 @@ class DetectionPipeline:
         
         for result in weapon_results:
             person_id = result['person_info']['person_id']
-            person_confidence = result['person_info'].get('confidence', result['person_info'].get('person_confidence'))
             
             if result['has_weapons'] and result['weapon_crops']:
                 people_with_weapons += 1
