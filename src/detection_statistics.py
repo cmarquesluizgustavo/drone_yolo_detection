@@ -1,669 +1,370 @@
+import math
+from collections import defaultdict
+
+
 class DetectionStatistics:
-    """Class to track comprehensive detection statistics."""
-    
-    def __init__(self, sample_majority_threshold=1):
+    """
+    Comprehensive detection + distance evaluation container.
+
+    Responsibilities:
+    - Frame-level weapon detection metrics
+    - Sample-level majority voting metrics
+    - Segmented metrics (distance / height / class)
+    - Unified RMSE logging for pinhole / pitch / fused
+    """
+
+    # -------------------------
+    # INIT / RESET / LIFECYCLE
+    # -------------------------
+
+    def __init__(self, sample_majority_threshold=1, min_rmse_samples=1):
         self.sample_majority_threshold = sample_majority_threshold
+        self.min_rmse_samples = min_rmse_samples
         self.reset()
-    
+
     def reset(self):
-        """Reset all statistics."""
+        # --- lifecycle ---
+        self.in_sample = False
+
+        # --- image / people ---
         self.total_images = 0
         self.images_with_people = 0
         self.total_people = 0
         self.total_weapons = 0
         self.people_with_weapons = 0
+
+        # --- samples ---
         self.total_samples = 0
         self.samples_with_weapons = 0
-        self.current_sample_has_weapons = False
-        
-        # Per-frame metrics
+
+        # --- frame confusion ---
         self.tp_frame = 0
         self.tn_frame = 0
         self.fp_frame = 0
         self.fn_frame = 0
-        
-        # Per-sample metrics
+
+        # --- sample confusion ---
         self.tp_sample = 0
         self.tn_sample = 0
         self.fp_sample = 0
         self.fn_sample = 0
-        
-        # Per-sample metrics by class
-        self.sample_metrics_by_class = {}  # {'real': {tp, tn, fp, fn}, 'falso': {...}}
-        
-        # Legacy single metrics (will be same as frame metrics)
-        self.tp = 0
-        self.tn = 0
-        self.fp = 0
-        self.fn = 0
-        self.accuracy = 0
-        self.prec= 0
-        self.recall = 0
-        self.f1score = 0
-        
-        # Distance tracking
+
+        self.sample_metrics_by_class = {}
+
+        # --- segmented detection metrics ---
+        self.metrics_by_distance = {}
+        self.metrics_by_height = {}
+        self.metrics_by_class = {}
+
+        # --- distance stats ---
         self.distances = []
         self.people_with_distance = 0
-        # For RMSE: list of (estimated, real) pairs
-        self.distance_pairs = []
 
-        # Method-specific RMSE evaluation
-        self.distance_pairs_pinhole = []  # (est_pinhole, real)
-        self.distance_pairs_pitch = []     # (est_pitch_based, real)
+        # --- unified RMSE storage ---
+        self.rmse_pairs = []  # canonical store
 
-        # Fused (dual-drone) RMSE evaluation (distance derived from fused geoposition)
-        self.distance_pairs_fused = []  # (est_fused_distance, real)
-        self.distance_pairs_fused_d1 = []  # (est_fused_distance_d1, real)
-        self.distance_pairs_fused_d2 = []  # (est_fused_distance_d2, real)
-
-        # Fused-geo RMSE by (distance, height) bucket, per drone.
-        self.distance_pairs_fused_d1_by_dist_height = {}  # {(dist, height): [(est, real), ...]}
-        self.distance_pairs_fused_d2_by_dist_height = {}  # {(dist, height): [(est, real), ...]}
-
-        # Method-specific RMSE evaluation by (class, distance, height)
-        self.distance_pairs_pinhole_by_combo = {}  # {(cls, dist, height): [(est, real), ...]}
-        self.distance_pairs_pitch_by_combo = {}    # {(cls, dist, height): [(est, real), ...]}
-
-        # Method-specific RMSE evaluation by (class, distance, height, camera_pitch)
-        self.distance_pairs_pinhole_by_combo_pitch = {}  # {(cls, dist, height, pitch): [(est, real), ...]}
-        self.distance_pairs_pitch_by_combo_pitch = {}     # {(cls, dist, height, pitch): [(est, real), ...]}
-
-        # Distance pairs per camera height for RMSE calculation
-        self.distance_pairs_by_height = {}  # {2: [(est, real), ...], 5: [...]}
-        # Distance pairs by (class, distance, height) combinations
-        self.distance_pairs_by_combination = {}  # {('real', 5, 2): [(est, real), ...], ...}
-        # Distance pairs by (distance, height) for aggregation across classes
-        self.distance_pairs_by_dist_height = {}  # {(5, 2): [(est, real), ...], ...}
-        # Distance pairs by (class, distance, height, camera_pitch) combinations
-        self.distance_pairs_by_combination_with_pitch = {}  # {('real', 5, 2, 45): [(est, real), ...], ...}
-        # Distance pairs by (distance, height, camera_pitch) for aggregation across classes
-        self.distance_pairs_by_dist_height_pitch = {}  # {(5, 2, 45): [(est, real), ...], ...}
-        
-        # Segmented metrics: per distance, height, and class
-        self.metrics_by_distance = {}  # {5: {tp, tn, fp, fn}, 10: {...}}
-        self.metrics_by_height = {}    # {2: {tp, tn, fp, fn}, 5: {...}}
-        self.metrics_by_class = {}     # {'real': {tp, tn, fp, fn}, 'falso': {...}}
-        
-        # Sample tracking
+        # --- current sample tracking ---
         self.current_sample_ground_truth = False
-        self.current_sample_detected_weapons = False
         self.current_sample_class = None
         self.current_sample_frames_with_weapons = 0
         self.current_sample_total_frames = 0
-    
+
+    # -------------------------
+    # BUCKETING HELPERS
+    # -------------------------
+
+    def bucket_distance(self, d):
+        return int(round(d))
+
+    def bucket_pitch(self, pitch_real, pitch_annot):
+        return pitch_real if pitch_real is not None else pitch_annot
+
+    # -------------------------
+    # SAMPLE HANDLING
+    # -------------------------
+
     def start_new_sample(self, sample_ground_truth=False, sample_class=None):
-        """Mark the start of a new sample directory."""
-        # Finalize previous sample if this isn't the first one
-        if hasattr(self, 'current_sample_ground_truth'):
+        if self.in_sample:
             self.finalize_current_sample()
-        
-        # Initialize new sample
+
+        self.in_sample = True
+        self.total_samples += 1
+
         self.current_sample_ground_truth = sample_ground_truth
-        self.current_sample_detected_weapons = False
-        self.current_sample_has_weapons = False
         self.current_sample_class = sample_class
         self.current_sample_frames_with_weapons = 0
         self.current_sample_total_frames = 0
-        self.total_samples += 1
-    
+
     def finalize_current_sample(self):
-        """Finalize the current sample and update sample-level metrics using majority voting."""
-        if not hasattr(self, 'current_sample_ground_truth'):
+        if not self.in_sample:
             return
-        
-        # Determine if sample has weapons using majority voting
-        # Sample is classified as having weapons if >= threshold frames have weapons
-        sample_has_weapons = self.current_sample_frames_with_weapons >= self.sample_majority_threshold
-        
-        # Update sample count
-        if sample_has_weapons:
+
+        detected = (
+            self.current_sample_frames_with_weapons
+            >= self.sample_majority_threshold
+        )
+
+        if detected:
             self.samples_with_weapons += 1
-        
-        # Update sample-level confusion matrix
-        if sample_has_weapons:  # Weapons detected in sample (via majority voting)
-            if self.current_sample_ground_truth:  # Ground truth: should have weapons
-                metric_result = 'tp'
-                self.tp_sample += 1  # True Positive
-            else:  # Ground truth: should not have weapons
-                metric_result = 'fp'
-                self.fp_sample += 1  # False Positive
-        else:  # No weapons detected in sample
-            if self.current_sample_ground_truth:  # Ground truth: should have weapons
-                metric_result = 'fn'
-                self.fn_sample += 1  # False Negative
-            else:  # Ground truth: should not have weapons
-                metric_result = 'tn'
-                self.tn_sample += 1  # True Negative
-        
-        # Update per-sample metrics by class
+
+        if detected:
+            if self.current_sample_ground_truth:
+                result = "tp"
+                self.tp_sample += 1
+            else:
+                result = "fp"
+                self.fp_sample += 1
+        else:
+            if self.current_sample_ground_truth:
+                result = "fn"
+                self.fn_sample += 1
+            else:
+                result = "tn"
+                self.tn_sample += 1
+
         if self.current_sample_class is not None:
-            if self.current_sample_class not in self.sample_metrics_by_class:
-                self.sample_metrics_by_class[self.current_sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
-            self.sample_metrics_by_class[self.current_sample_class][metric_result] += 1
-    
+            self.sample_metrics_by_class.setdefault(
+                self.current_sample_class,
+                {"tp": 0, "tn": 0, "fp": 0, "fn": 0},
+            )
+            self.sample_metrics_by_class[self.current_sample_class][result] += 1
+
+        self.in_sample = False
+
+    # -------------------------
+    # IMAGE RESULTS
+    # -------------------------
+
     def add_image_results(
         self,
         num_people,
         num_weapons,
         people_with_weapons_count,
-        has_weapons_ground_truth,
+        has_weapon_ground_truth,
         distances=None,
-        distance_pairs=None,
         real_distance=None,
         cam_height_m=None,
         sample_class=None,
         camera_pitch_annotated_deg=None,
         camera_pitch_real_deg=None,
-        distance_pairs_pinhole=None,
-        distance_pairs_pitch=None,
-        distance_pairs_fused=None,
-        distance_pairs_fused_d1=None,
-        distance_pairs_fused_d2=None,
+        distance_estimates=None,
     ):
-        """Add results from processing one image."""
+        """
+        distance_estimates: list of dicts like:
+        {
+            "est": float,
+            "method": "pinhole" | "pitch" | "fused",
+            "fusion_type": "avg" | "bi" | None,
+            "d_source": "d1" | "d2" | "all" | None,
+        }
+        """
 
+        # --- image stats ---
         self.total_images += 1
         if num_people > 0:
             self.images_with_people += 1
-        
+
         self.total_people += num_people
         self.total_weapons += num_weapons
         self.people_with_weapons += people_with_weapons_count
-        
-        # Track sample-level detection (for majority voting)
+
+        # --- sample tracking ---
         self.current_sample_total_frames += 1
         if num_weapons > 0:
-            self.current_sample_has_weapons = True
-            self.current_sample_detected_weapons = True
             self.current_sample_frames_with_weapons += 1
-        
-        # Calculate per-frame metrics
-        detected_weapon = num_weapons > 0
-        
-        if detected_weapon:  # Weapons detected in frame
-            if has_weapons_ground_truth:  # Ground truth: should have weapons
-                metric_result = 'tp'
-                self.tp_frame += 1  # True Positive
-            else:  # Ground truth: should not have weapons
-                metric_result = 'fp'
-                self.fp_frame += 1  # False Positive
-        else:  # No weapons detected in frame
-            if has_weapons_ground_truth:  # Ground truth: should have weapons
-                metric_result = 'fn'
-                self.fn_frame += 1  # False Negative
-            else:  # Ground truth: should not have weapons
-                metric_result = 'tn'
-                self.tn_frame += 1  # True Negative
-        
-        # Update segmented metrics
+
+        # --- frame confusion ---
+        detected = num_weapons > 0
+
+        if detected:
+            if has_weapon_ground_truth:
+                result = "tp"
+                self.tp_frame += 1
+            else:
+                result = "fp"
+                self.fp_frame += 1
+        else:
+            if has_weapon_ground_truth:
+                result = "fn"
+                self.fn_frame += 1
+            else:
+                result = "tn"
+                self.tn_frame += 1
+
+        # --- segmented detection metrics ---
         if real_distance is not None:
-            if real_distance not in self.metrics_by_distance:
-                self.metrics_by_distance[real_distance] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
-            self.metrics_by_distance[real_distance][metric_result] += 1
+            d = self.bucket_distance(real_distance)
+            self.metrics_by_distance.setdefault(
+                d, {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
+            )
+            self.metrics_by_distance[d][result] += 1
 
         if cam_height_m is not None:
-            if cam_height_m not in self.metrics_by_height:
-                self.metrics_by_height[cam_height_m] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
-            self.metrics_by_height[cam_height_m][metric_result] += 1
+            self.metrics_by_height.setdefault(
+                cam_height_m, {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
+            )
+            self.metrics_by_height[cam_height_m][result] += 1
 
         if sample_class is not None:
-            if sample_class not in self.metrics_by_class:
-                self.metrics_by_class[sample_class] = {'tp': 0, 'tn': 0, 'fp': 0, 'fn': 0}
-            self.metrics_by_class[sample_class][metric_result] += 1
-        
-        # Update legacy metrics (same as frame metrics for backward compatibility)
-        self.tp = self.tp_frame
-        self.tn = self.tn_frame
-        self.fp = self.fp_frame
-        self.fn = self.fn_frame
-        
-        # Add distance information
+            self.metrics_by_class.setdefault(
+                sample_class, {"tp": 0, "tn": 0, "fp": 0, "fn": 0}
+            )
+            self.metrics_by_class[sample_class][result] += 1
+
+        # --- distance collection ---
         if distances:
             self.distances.extend(distances)
             self.people_with_distance += len(distances)
 
-        # Store generic (estimated, real) RMSE pairs when provided.
-        if distance_pairs:
-            self.distance_pairs.extend(distance_pairs)
+        # --- unified RMSE logging (FRAME-LEVEL GUARANTEE) ---
+        if real_distance is not None and distance_estimates:
+            dist_bucket = self.bucket_distance(real_distance)
+            pitch_bucket = self.bucket_pitch(
+                camera_pitch_real_deg, camera_pitch_annotated_deg
+            )
 
-            # Track by height
-            if cam_height_m is not None:
-                if cam_height_m not in self.distance_pairs_by_height:
-                    self.distance_pairs_by_height[cam_height_m] = []
-                self.distance_pairs_by_height[cam_height_m].extend(distance_pairs)
+            seen = set()  # (method, fusion_type, d_source)
 
-            # Track by (class, distance, height)
-            if sample_class is not None and real_distance is not None and cam_height_m is not None:
-                combo_key = (sample_class, real_distance, cam_height_m)
-                if combo_key not in self.distance_pairs_by_combination:
-                    self.distance_pairs_by_combination[combo_key] = []
-                self.distance_pairs_by_combination[combo_key].extend(distance_pairs)
-
-            # Track by (distance, height) aggregated across classes
-            if real_distance is not None and cam_height_m is not None:
-                dist_height_key = (real_distance, cam_height_m)
-                if dist_height_key not in self.distance_pairs_by_dist_height:
-                    self.distance_pairs_by_dist_height[dist_height_key] = []
-                self.distance_pairs_by_dist_height[dist_height_key].extend(distance_pairs)
-
-            # Track by (class, distance, height, camera pitch)
-            pitch_bucket = camera_pitch_real_deg if camera_pitch_real_deg is not None else camera_pitch_annotated_deg
-            if sample_class is not None and real_distance is not None and cam_height_m is not None and pitch_bucket is not None:
-                combo_pitch_key = (sample_class, real_distance, cam_height_m, pitch_bucket)
-                if combo_pitch_key not in self.distance_pairs_by_combination_with_pitch:
-                    self.distance_pairs_by_combination_with_pitch[combo_pitch_key] = []
-                self.distance_pairs_by_combination_with_pitch[combo_pitch_key].extend(distance_pairs)
-
-                dist_height_pitch_key = (real_distance, cam_height_m, pitch_bucket)
-                if dist_height_pitch_key not in self.distance_pairs_by_dist_height_pitch:
-                    self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key] = []
-                self.distance_pairs_by_dist_height_pitch[dist_height_pitch_key].extend(distance_pairs)
-
-        # Store method-specific pairs (overall only; use these to compare methods).
-        if distance_pairs_pinhole:
-            self.distance_pairs_pinhole.extend(distance_pairs_pinhole)
-        if distance_pairs_pitch:
-            self.distance_pairs_pitch.extend(distance_pairs_pitch)
-        if distance_pairs_fused:
-            self.distance_pairs_fused.extend(distance_pairs_fused)
-        if distance_pairs_fused_d1:
-            self.distance_pairs_fused_d1.extend(distance_pairs_fused_d1)
-            if real_distance is not None and cam_height_m is not None:
-                key = (real_distance, cam_height_m)
-                if key not in self.distance_pairs_fused_d1_by_dist_height:
-                    self.distance_pairs_fused_d1_by_dist_height[key] = []
-                self.distance_pairs_fused_d1_by_dist_height[key].extend(distance_pairs_fused_d1)
-        if distance_pairs_fused_d2:
-            self.distance_pairs_fused_d2.extend(distance_pairs_fused_d2)
-            if real_distance is not None and cam_height_m is not None:
-                key = (real_distance, cam_height_m)
-                if key not in self.distance_pairs_fused_d2_by_dist_height:
-                    self.distance_pairs_fused_d2_by_dist_height[key] = []
-                self.distance_pairs_fused_d2_by_dist_height[key].extend(distance_pairs_fused_d2)
-
-        # Store method-specific pairs by (class, distance, height) when possible.
-        if sample_class is not None and real_distance is not None and cam_height_m is not None:
-            combo_key = (sample_class, real_distance, cam_height_m)
-
-            if distance_pairs_pinhole:
-                if combo_key not in self.distance_pairs_pinhole_by_combo:
-                    self.distance_pairs_pinhole_by_combo[combo_key] = []
-                self.distance_pairs_pinhole_by_combo[combo_key].extend(distance_pairs_pinhole)
-
-            if distance_pairs_pitch:
-                if combo_key not in self.distance_pairs_pitch_by_combo:
-                    self.distance_pairs_pitch_by_combo[combo_key] = []
-                self.distance_pairs_pitch_by_combo[combo_key].extend(distance_pairs_pitch)
-
-            # Also track method-specific pairs by pitch bucket (if available).
-            pitch_bucket = camera_pitch_real_deg if camera_pitch_real_deg is not None else camera_pitch_annotated_deg
-            if pitch_bucket is not None:
-                combo_pitch_key = (sample_class, real_distance, cam_height_m, pitch_bucket)
-
-                if distance_pairs_pinhole:
-                    if combo_pitch_key not in self.distance_pairs_pinhole_by_combo_pitch:
-                        self.distance_pairs_pinhole_by_combo_pitch[combo_pitch_key] = []
-                    self.distance_pairs_pinhole_by_combo_pitch[combo_pitch_key].extend(distance_pairs_pinhole)
-
-                if distance_pairs_pitch:
-                    if combo_pitch_key not in self.distance_pairs_pitch_by_combo_pitch:
-                        self.distance_pairs_pitch_by_combo_pitch[combo_pitch_key] = []
-                    self.distance_pairs_pitch_by_combo_pitch[combo_pitch_key].extend(distance_pairs_pitch)
-
-    def compute_rmse(self, distance_pairs=None):
-        """Compute RMSE for distance estimation (only where real distance is available)."""
-        pairs = distance_pairs if distance_pairs is not None else self.distance_pairs
-        if not pairs:
-            return None
-        diffsq = [(est-real)**2 for est, real in pairs if real is not None]
-        if not diffsq:
-            return None
-        mse = sum(diffsq) / len(diffsq)
-        return mse ** 0.5
-    
-    def finalize(self):
-        """Finalize statistics (call at the end)."""
-        # Finalize the last sample
-        self.finalize_current_sample()
-    
-    def calculate_metrics(self, tp, tn, fp, fn):
-        """Calculate accuracy, precision, recall, and F1-score from confusion matrix."""
-        total_predictions = tp + tn + fp + fn
-        
-        if total_predictions > 0:
-            accuracy = (tp + tn) / total_predictions
-        else:
-            accuracy = 0
-            
-        if (tp + fp) > 0:
-            precision = tp / (tp + fp)
-        else:
-            precision = 0
-            
-        if (tp + fn) > 0:
-            recall = tp / (tp + fn)
-        else:
-            recall = 0
-            
-        if (precision + recall) > 0:
-            f1score = 2 * (precision * recall) / (precision + recall)
-        else:
-            f1score = 0
-        
-        return accuracy, precision, recall, f1score
-    
-    def get_percentages(self):
-        """Calculate and return percentage statistics."""
-        # Percentage of images with people
-        people_in_images_pct = (self.images_with_people / self.total_images * 100) if self.total_images > 0 else 0
-        
-        # Percentage of people with weapons
-        weapons_in_people_pct = (self.people_with_weapons / self.total_people * 100) if self.total_people > 0 else 0
-        
-        # Percentage of samples with weapons
-        weapons_in_samples_pct = (self.samples_with_weapons / self.total_samples * 100) if self.total_samples > 0 else 0
-        
-        # Calculate frame-level metrics
-        frame_accuracy, frame_precision, frame_recall, frame_f1score = self.calculate_metrics(
-            self.tp_frame, self.tn_frame, self.fp_frame, self.fn_frame
-        )
-        
-        # Calculate sample-level metrics
-        sample_accuracy, sample_precision, sample_recall, sample_f1score = self.calculate_metrics(
-            self.tp_sample, self.tn_sample, self.fp_sample, self.fn_sample
-        )
-        
-        # Update legacy metrics (frame-level for backward compatibility)
-        self.accuracy = frame_accuracy
-        self.precision = frame_precision
-        self.recall = frame_recall
-        self.f1score = frame_f1score
-        
-        return {
-            'people_in_images_pct': people_in_images_pct,
-            'weapons_in_people_pct': weapons_in_people_pct,
-            'weapons_in_samples_pct': weapons_in_samples_pct,
-            'total_images': self.total_images,
-            'images_with_people': self.images_with_people,
-            'total_people': self.total_people,
-            'total_weapons': self.total_weapons,
-            'people_with_weapons': self.people_with_weapons,
-            'total_samples': self.total_samples,
-            'samples_with_weapons': self.samples_with_weapons,
-            
-            # Frame-level metrics
-            'frame_accuracy': frame_accuracy,
-            'frame_precision': frame_precision,
-            'frame_recall': frame_recall,
-            'frame_f1score': frame_f1score,
-            'tp_frame': self.tp_frame,
-            'tn_frame': self.tn_frame,
-            'fp_frame': self.fp_frame,
-            'fn_frame': self.fn_frame,
-            
-            # Sample-level metrics
-            'sample_accuracy': sample_accuracy,
-            'sample_precision': sample_precision,
-            'sample_recall': sample_recall,
-            'sample_f1score': sample_f1score,
-            'tp_sample': self.tp_sample,
-            'tn_sample': self.tn_sample,
-            'fp_sample': self.fp_sample,
-            'fn_sample': self.fn_sample,
-            
-            # Legacy metrics (same as frame)
-            'accuracy': self.accuracy,
-            'precision': self.precision,
-            'recall': self.recall,
-            'f1score': self.f1score,
-            'tp': self.tp,
-            'tn': self.tn,
-            'fp': self.fp,
-            'fn': self.fn,
-            
-            'people_with_distance': self.people_with_distance,
-            'total_distances': len(self.distances)
-        }
-    
-    def print_summary(self):
-        """Print comprehensive statistics summary."""
-        stats = self.get_percentages()
-        
-        print("\n" + "=" * 60)
-        print("COMPREHENSIVE DETECTION STATISTICS")
-        print("=" * 60)
-        
-        print(f"IMAGE STATISTICS:")
-        print(f"   Total images processed: {stats['total_images']:,}")
-        print(f"   Images with people: {stats['images_with_people']:,} ({stats['people_in_images_pct']:.1f}%)")
-        
-        print(f"PEOPLE STATISTICS:")
-        print(f"   Total people detected: {stats['total_people']:,}")
-        print(f"   People with weapons: {stats['people_with_weapons']:,} ({stats['weapons_in_people_pct']:.1f}%)")
-        
-        print(f"WEAPON STATISTICS:")
-        print(f"   Total weapons detected: {stats['total_weapons']:,}")
-        
-        print(f"SAMPLE STATISTICS:")
-        print(f"   Total samples processed: {stats['total_samples']:,}")
-        print(f"   Samples with weapons: {stats['samples_with_weapons']:,} ({stats['weapons_in_samples_pct']:.1f}%)")
-        
-        if stats['total_distances'] > 0:
-            print(f"   People with distance data: {stats['people_with_distance']:,}")
-        else:
-            print(f"   No distance data available")
-        
-        print(f"KEY PERCENTAGES:")
-        print(f"People in images: {stats['people_in_images_pct']:.1f}% of images contain people")
-        print(f"Weapons in people: {stats['weapons_in_people_pct']:.1f}% of people have weapons")
-        print(f"Weapons in samples: {stats['weapons_in_samples_pct']:.1f}% of samples contain weapons")
-        
-        print(f"\nOVERALL METRICS:")
-        print(f"   Accuracy:  {stats['frame_accuracy']:.3f}")
-        print(f"   Precision: {stats['frame_precision']:.3f}")
-        print(f"   Recall:    {stats['frame_recall']:.3f}")
-        print(f"   F1-Score:  {stats['frame_f1score']:.3f}")
-        print(f"   TP: {stats['tp_frame']}, TN: {stats['tn_frame']}, FP: {stats['fp_frame']}, FN: {stats['fn_frame']}")
-        
-        # Print segmented metrics
-        if self.metrics_by_distance:
-            print(f"\nMETRICS BY DISTANCE:")
-            for dist in sorted(self.metrics_by_distance.keys()):
-                m = self.metrics_by_distance[dist]
-                acc, prec, rec, f1 = self.calculate_metrics(m['tp'], m['tn'], m['fp'], m['fn'])
-                print(f"   Distance: {dist}m")
-                print(f"      Accuracy:  {acc:.3f}")
-                print(f"      Precision: {prec:.3f}")
-                print(f"      Recall:    {rec:.3f}")
-                print(f"      F1-Score:  {f1:.3f}")
-                print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
-        
-        if self.metrics_by_height:
-            print(f"\nMETRICS BY CAMERA HEIGHT:")
-            for height in sorted(self.metrics_by_height.keys()):
-                m = self.metrics_by_height[height]
-                acc, prec, rec, f1 = self.calculate_metrics(m['tp'], m['tn'], m['fp'], m['fn'])
-                # Calculate RMSE for this height
-                rmse_height = None
-                if height in self.distance_pairs_by_height:
-                    rmse_height = self.compute_rmse(self.distance_pairs_by_height[height])
-                print(f"   Height: {height}m")
-                print(f"      Accuracy:  {acc:.3f}")
-                print(f"      Precision: {prec:.3f}")
-                print(f"      Recall:    {rec:.3f}")
-                print(f"      F1-Score:  {f1:.3f}")
-                if rmse_height is not None:
-                    print(f"      RMSE:      {rmse_height:.3f}m")
-                print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
-        
-        if self.metrics_by_class:
-            print(f"\nMETRICS BY CLASS:")
-            for cls in sorted(self.metrics_by_class.keys()):
-                m = self.metrics_by_class[cls]
-                acc, prec, rec, f1 = self.calculate_metrics(m['tp'], m['tn'], m['fp'], m['fn'])
-                print(f"   Class: {cls}")
-                print(f"      Accuracy:  {acc:.3f}")
-                print(f"      Precision: {prec:.3f}")
-                print(f"      Recall:    {rec:.3f}")
-                print(f"      F1-Score:  {f1:.3f}")
-                print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
-        
-        # Print RMSE by (distance, height) combinations, showing per-class and aggregate
-        if self.distance_pairs_by_dist_height:
-            print(f"\nRMSE BY (DISTANCE, HEIGHT) COMBINATIONS:")
-            for (dist, height) in sorted(self.distance_pairs_by_dist_height.keys()):
-                print(f"   Distance: {dist}m, Height: {height}m")
-                # Show per-class RMSE
-                for cls in ['falso', 'real']:
-                    cls_key = (cls, dist, height)
-                    if cls_key in self.distance_pairs_by_combination:
-                        pairs = self.distance_pairs_by_combination[cls_key]
-                        rmse_cls = self.compute_rmse(pairs)
-                        if rmse_cls is not None:
-                            print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
-                # Show aggregate RMSE for all classes
-                all_pairs = self.distance_pairs_by_dist_height[(dist, height)]
-                rmse_all = self.compute_rmse(all_pairs)
-                if rmse_all is not None:
-                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
-
-        # Print PINHOLE (height-based) RMSE by (distance, height) combinations.
-        # This is method-specific and uses the per-method buckets collected during processing.
-        if self.distance_pairs_pinhole_by_combo:
-            print(f"\nPINHOLE RMSE BY (DISTANCE, HEIGHT) COMBINATIONS:")
-
-            pinhole_by_dist_height = {}
-            for (cls, dist, height), pairs in self.distance_pairs_pinhole_by_combo.items():
-                key = (dist, height)
-                if key not in pinhole_by_dist_height:
-                    pinhole_by_dist_height[key] = []
-                pinhole_by_dist_height[key].extend(pairs)
-
-            for (dist, height) in sorted(pinhole_by_dist_height.keys()):
-                print(f"   Distance: {dist}m, Height: {height}m")
-                for cls in ['falso', 'real']:
-                    cls_key = (cls, dist, height)
-                    pairs = self.distance_pairs_pinhole_by_combo.get(cls_key)
-                    if not pairs:
-                        continue
-                    rmse_cls = self.compute_rmse(pairs)
-                    if rmse_cls is not None:
-                        print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
-
-                all_pairs = pinhole_by_dist_height[(dist, height)]
-                rmse_all = self.compute_rmse(all_pairs)
-                if rmse_all is not None:
-                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
-        
-        # Print RMSE by (distance, height, camera pitch) combinations, showing per-class and aggregate
-        if self.distance_pairs_by_dist_height_pitch:
-            print(f"\nRMSE BY (DISTANCE, HEIGHT, CAMERA PITCH) COMBINATIONS:")
-            for (dist, height, pitch) in sorted(self.distance_pairs_by_dist_height_pitch.keys()):
-                print(f"   Distance: {dist}m, Height: {height}m, CameraPitch: {pitch}deg")
-                # Show per-class RMSE
-                for cls in ['falso', 'real']:
-                    cls_key = (cls, dist, height, pitch)
-                    if cls_key in self.distance_pairs_by_combination_with_pitch:
-                        pairs = self.distance_pairs_by_combination_with_pitch[cls_key]
-                        rmse_cls = self.compute_rmse(pairs)
-                        if rmse_cls is not None:
-                            print(f"      Class '{cls}': RMSE = {rmse_cls:.3f}m ({len(pairs)} measurements)")
-                # Show aggregate RMSE for all classes
-                all_pairs = self.distance_pairs_by_dist_height_pitch[(dist, height, pitch)]
-                rmse_all = self.compute_rmse(all_pairs)
-                if rmse_all is not None:
-                    print(f"      Class 'all':   RMSE = {rmse_all:.3f}m ({len(all_pairs)} measurements)")
-        
-        # Print overall RMSE
-        rmse = self.compute_rmse()
-        if rmse is not None:
-            print(f"\nOVERALL DISTANCE ESTIMATION RMSE: {rmse:.3f}m")
-
-        # Print method comparison RMSE (pinhole vs pitch-based)
-        rmse_pinhole = self.compute_rmse(self.distance_pairs_pinhole)
-        rmse_pitch = self.compute_rmse(self.distance_pairs_pitch)
-        rmse_fused = self.compute_rmse(self.distance_pairs_fused)
-        rmse_fused_d1 = self.compute_rmse(self.distance_pairs_fused_d1)
-        rmse_fused_d2 = self.compute_rmse(self.distance_pairs_fused_d2)
-        if rmse_pinhole is not None or rmse_pitch is not None:
-            print("\nDISTANCE ESTIMATION METHOD COMPARISON:")
-            if rmse_pinhole is not None:
-                print(f"   PINHOLE RMSE: {rmse_pinhole:.3f}m ({len(self.distance_pairs_pinhole)} measurements)")
-            else:
-                print("   PINHOLE RMSE: N/A")
-            if rmse_pitch is not None:
-                print(f"   PITCH-BASED RMSE: {rmse_pitch:.3f}m ({len(self.distance_pairs_pitch)} measurements)")
-            else:
-                print("   PITCH-BASED RMSE: N/A")
-
-        if rmse_fused is not None:
-            print(f"   FUSED-GEO DISTANCE RMSE: {rmse_fused:.3f}m ({len(self.distance_pairs_fused)} measurements)")
-
-        # When running dual-drone fusion, also report per-drone fused-geo RMSE.
-        if rmse_fused_d1 is not None:
-            print(f"   FUSED-GEO DISTANCE RMSE (D1): {rmse_fused_d1:.3f}m ({len(self.distance_pairs_fused_d1)} measurements)")
-        if rmse_fused_d2 is not None:
-            print(f"   FUSED-GEO DISTANCE RMSE (D2): {rmse_fused_d2:.3f}m ({len(self.distance_pairs_fused_d2)} measurements)")
-
-        # Method comparison by (class, distance, height, camera pitch)
-        if self.distance_pairs_pinhole_by_combo_pitch or self.distance_pairs_pitch_by_combo_pitch:
-            print("\nDISTANCE METHOD RMSE BY (CLASS, DISTANCE, HEIGHT, CAMERA PITCH):")
-            all_keys = sorted(set(self.distance_pairs_pinhole_by_combo_pitch.keys()) | set(self.distance_pairs_pitch_by_combo_pitch.keys()))
-            for (cls, dist, height, pitch) in all_keys:
-                pairs_p = self.distance_pairs_pinhole_by_combo_pitch.get((cls, dist, height, pitch), [])
-                pairs_pitch = self.distance_pairs_pitch_by_combo_pitch.get((cls, dist, height, pitch), [])
-                rmse_p = self.compute_rmse(pairs_p)
-                rmse_pitch = self.compute_rmse(pairs_pitch)
-
-                # Skip buckets with no usable measurements
-                if rmse_p is None and rmse_pitch is None:
+            for d in distance_estimates:
+                est = d.get("est")
+                if est is None:
                     continue
 
-                p_str = f"{rmse_p:.3f}m" if rmse_p is not None else "N/A"
-                pitch_str = f"{rmse_pitch:.3f}m" if rmse_pitch is not None else "N/A"
-                print(f"   {cls} | dist={dist}m, h={height}m, camera_pitch={pitch}deg -> PINHOLE={p_str}, PITCH-BASED={pitch_str}")
-        
-        print("\n" + "=" * 60)
-        
-        print(f"\nPER-SAMPLE METRICS (Majority Threshold: {self.sample_majority_threshold} frame(s)):")
-        print(f"   Accuracy:  {stats['sample_accuracy']:.3f}")
-        print(f"   Precision: {stats['sample_precision']:.3f}")
-        print(f"   Recall:    {stats['sample_recall']:.3f}")
-        print(f"   F1-Score:  {stats['sample_f1score']:.3f}")
-        print(f"   TP: {stats['tp_sample']}, TN: {stats['tn_sample']}, FP: {stats['fp_sample']}, FN: {stats['fn_sample']}")
-        
-        # Print per-sample metrics by class
-        if self.sample_metrics_by_class:
-            print(f"\nPER-SAMPLE METRICS BY CLASS (Majority Threshold: {self.sample_majority_threshold} frame(s)):")
-            for cls in sorted(self.sample_metrics_by_class.keys()):
-                m = self.sample_metrics_by_class[cls]
-                acc, prec, rec, f1 = self.calculate_metrics(m['tp'], m['tn'], m['fp'], m['fn'])
-                print(f"   Class: {cls}")
-                print(f"      Accuracy:  {acc:.3f}")
-                print(f"      Precision: {prec:.3f}")
-                print(f"      Recall:    {rec:.3f}")
-                print(f"      F1-Score:  {f1:.3f}")
-                print(f"      TP: {m['tp']}, TN: {m['tn']}, FP: {m['fp']}, FN: {m['fn']}")
-        
-        print("\n" + "=" * 60)
-        print(f"   F1-Score: {stats['sample_f1score']:.4f}")
-        print(f"   TP: {stats['tp_sample']}")
-        print(f"   TN: {stats['tn_sample']}")
-        print(f"   FP: {stats['fp_sample']}")
-        print(f"   FN: {stats['fn_sample']}")
-        
+                key = (
+                    d.get("method"),
+                    d.get("fusion_type"),
+                    d.get("d_source"),
+                )
 
-        '''
-        if stats['total_weapons'] > 0:
-            avg_weapons_per_person = stats['total_weapons'] / stats['people_with_weapons']
-            print(f"\n   📊 Average weapons per armed person: {avg_weapons_per_person:.1f}")
-        '''
+                # Enforce ONE RMSE ENTRY per frame per method/fusion/source
+                if key in seen:
+                    continue
+                seen.add(key)
 
-        # Print RMSE for distance estimation
-        rmse = self.compute_rmse()
-        if rmse is not None:
-            print(f"\nDistance Estimation RMSE: {rmse:.3f} meters")
-        else:
-            print(f"\nDistance Estimation RMSE: N/A (no ground truth)")
+                self.rmse_pairs.append(
+                    {
+                        "est": est,
+                        "real": real_distance,
+                        "method": d.get("method"),
+                        "fusion_type": d.get("fusion_type"),
+                        "d_source": d.get("d_source"),
+                        "class": sample_class,
+                        "distance": dist_bucket,
+                        "height": cam_height_m,
+                        "pitch": pitch_bucket,
+                    }
+                )
+
+    # -------------------------
+    # METRICS
+    # -------------------------
+
+    def calculate_metrics(self, tp, tn, fp, fn):
+        total = tp + tn + fp + fn
+        if total == 0:
+            return 0, 0, 0, 0
+
+        acc = (tp + tn) / total
+        prec = tp / (tp + fp) if (tp + fp) > 0 else 0
+        rec = tp / (tp + fn) if (tp + fn) > 0 else 0
+        f1 = (
+            2 * prec * rec / (prec + rec)
+            if (prec + rec) > 0
+            else 0
+        )
+        return acc, prec, rec, f1
+
+    # -------------------------
+    # RMSE
+    # -------------------------
+
+    def compute_rmse_filtered(self, **filters):
+        pairs = [
+            p
+            for p in self.rmse_pairs
+            if all(p.get(k) == v for k, v in filters.items())
+            and p["est"] is not None
+            and p["real"] is not None
+        ]
+
+        if len(pairs) < self.min_rmse_samples:
+            return None
+
+        mse = sum((p["est"] - p["real"]) ** 2 for p in pairs) / len(
+            pairs
+        )
+        return math.sqrt(mse)
+
+    # -------------------------
+    # FINALIZE
+    # -------------------------
+
+    def finalize(self):
+        if self.in_sample:
+            self.finalize_current_sample()
+
+    # -------------------------
+    # SUMMARY PRINT
+    # -------------------------
+
+    def print_summary(self):
+        print("\n" + "=" * 60)
+        print("DETECTION SUMMARY")
+        print("=" * 60)
+
+        acc, prec, rec, f1 = self.calculate_metrics(
+            self.tp_frame, self.tn_frame, self.fp_frame, self.fn_frame
+        )
+
+        print(f"Frames: {self.total_images}")
+        print(f"Accuracy: {acc:.3f}")
+        print(f"Precision: {prec:.3f}")
+        print(f"Recall: {rec:.3f}")
+        print(f"F1: {f1:.3f}")
+
+        print("\nSAMPLE METRICS")
+        acc, prec, rec, f1 = self.calculate_metrics(
+            self.tp_sample, self.tn_sample, self.fp_sample, self.fn_sample
+        )
+        print(f"Accuracy: {acc:.3f}")
+        print(f"Precision: {prec:.3f}")
+        print(f"Recall: {rec:.3f}")
+        print(f"F1: {f1:.3f}")
+
+        print("\nRMSE SUMMARY")
+        print("-" * 60)
+
+        # --- Monocular ---
+        for method in ["pinhole", "pitch"]:
+            rmse = self.compute_rmse_filtered(method=method)
+            if rmse is not None:
+                print(f"{method.upper():<10}: {rmse:.3f} m")
+
+        # --- Fused (overall) ---
+        rmse_fused = self.compute_rmse_filtered(method="fused")
+        if rmse_fused is not None:
+            print(f"{'FUSED':<10}: {rmse_fused:.3f} m")
+
+        # --- Fused breakdown ---
+        print("\nFUSED RMSE BREAKDOWN")
+
+        for fusion_type in ["avg", "bi"]:
+            rmse_ft = self.compute_rmse_filtered(
+                method="fused",
+                fusion_type=fusion_type,
+            )
+            if rmse_ft is not None:
+                print(f"  {fusion_type.upper():<4} (all): {rmse_ft:.3f} m")
+
+            for src in ["d1", "d2", "all"]:
+                rmse_src = self.compute_rmse_filtered(
+                    method="fused",
+                    fusion_type=fusion_type,
+                    d_source=src,
+                )
+                if rmse_src is not None:
+                    print(
+                        f"    {fusion_type.upper():<4} {src.upper():<3}: {rmse_src:.3f} m"
+                    )
 
         print("\n" + "=" * 60)

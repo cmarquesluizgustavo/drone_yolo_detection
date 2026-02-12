@@ -120,7 +120,7 @@ class WeaponDetector:
             'person_info': crop_info,
             'weapon_detections': weapon_detections,
             'weapon_crops': weapon_crops,
-            'has_weapons': len(weapon_detections) > 0,
+            'has_weapon': len(weapon_detections) > 0,
         }
 
     def process_multiple_crops(self, crops_with_info):

@@ -128,7 +128,7 @@ def tracks_from_detections(detections_info, weapon_results=None, track_id_start=
         # If weapon results are supplied, compute weapon status/confidence from them.
         if i < len(weapon_results) and isinstance(weapon_results[i], dict):
             wr = weapon_results[i]
-            has_weapon = bool(wr.get('has_weapons', has_weapon))
+            has_weapon = bool(wr.get('has_weapon', has_weapon))
             if has_weapon:
                 w_dets = wr.get('weapon_detections') or []
                 if w_dets:

@@ -166,7 +166,7 @@ class DetectionPipeline:
         font_thickness = 2
             
         for result in weapon_results:
-            if result['has_weapons'] and result['weapon_detections']:
+            if result['has_weapon'] and result['weapon_detections']:
                 # Get person crop info to translate weapon boxes to full image coordinates
                 person_info = result['person_info']
                 padded_bbox = person_info['padded_bbox']
@@ -254,7 +254,7 @@ class DetectionPipeline:
         for result in weapon_results:
             person_id = result['person_info']['person_id']
             
-            if result['has_weapons'] and result['weapon_crops']:
+            if result['has_weapon'] and result['weapon_crops']:
                 people_with_weapons += 1
                 
                 # Save each weapon crop separately
@@ -291,9 +291,9 @@ class DetectionPipeline:
             dir_meta = {}
         sample_class_dir = (dir_meta or {}).get('sample_class')
         if sample_class_dir in ('real', 'falso'):
-            has_weapons_ground_truth = (sample_class_dir == 'real')
+            has_weapon_ground_truth = (sample_class_dir == 'real')
         else:
-            has_weapons_ground_truth = dir_name.lower().startswith("real")
+            has_weapon_ground_truth = dir_name.lower().startswith("real")
         
         # Get all image files
         image_files = []
@@ -302,8 +302,8 @@ class DetectionPipeline:
                 image_files.append(os.path.join(input_dir, file))
         
         print(f"Found {len(image_files)} images in {input_dir}")
-        print(f"Ground truth for this directory: {'Has weapons' if has_weapons_ground_truth else 'No weapons'}")
-        
+        print(f"Ground truth for this directory: {'Has weapon' if has_weapon_ground_truth else 'No weapon'}")
+
         # Process each image
         for i, image_path in enumerate(image_files):
             try:
@@ -410,13 +410,13 @@ class DetectionPipeline:
                         best_idx = detections.index(best_detection)
                         if best_idx < len(weapon_results):
                             best_weapon_result = weapon_results[best_idx]
-                            if best_weapon_result.get('has_weapons', False):
+                            if best_weapon_result.get('has_weapon', False):
                                 weapons_detected_for_metrics = len(best_weapon_result.get('weapon_detections', []))
                                 people_with_weapons_for_metrics = 1
                 
                 # Update statistics with ground truth from directory name
                 self.stats.add_image_results(
-                    num_people_for_metrics, weapons_detected_for_metrics, people_with_weapons_for_metrics, has_weapons_ground_truth,
+                    num_people_for_metrics, weapons_detected_for_metrics, people_with_weapons_for_metrics, has_weapon_ground_truth,
                     distances, distance_pairs, real_distance, camera_height_annotated,
                     sample_class=sample_class,
                     camera_pitch_annotated_deg=camera_pitch_annotated_deg,
@@ -434,11 +434,11 @@ class DetectionPipeline:
                         summary_parts.append(f"detected {weapons_detected} weapons")
                         if people_with_weapons_count > 0:
                             summary_parts.append(f"({people_with_weapons_count} people with weapons)")
-                    ground_truth_label = "real weapons" if has_weapons_ground_truth else "no weapons"
+                    ground_truth_label = "real weapons" if has_weapon_ground_truth else "no weapons"
                     summary_parts.append(f"ground: {ground_truth_label}")
                     print(f"  -> {', '.join(summary_parts)}")
                 else:
-                    ground_truth_label = "real weapons" if has_weapons_ground_truth else "no weapons"
+                    ground_truth_label = "real weapons" if has_weapon_ground_truth else "no weapons"
                     print(f"  -> No people detected, ground: {ground_truth_label}")
 
             except Exception as e:

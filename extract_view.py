@@ -23,6 +23,6 @@ def collect_frame_0003_to_view(base_detections_dir, base_view_dir):
             print(f"Copied {count} files to {dest_dir}")
 
 if __name__ == "__main__":
-    base_detections_dir = r"d:\DRONE\drone_yolo_detection\output\detections"
+    base_detections_dir = r"/home/caio.torkst/Downloads/drone_yolo_detection/output/detections"
     base_view_dir = os.path.join(base_detections_dir, "view")
     collect_frame_0003_to_view(base_detections_dir, base_view_dir)

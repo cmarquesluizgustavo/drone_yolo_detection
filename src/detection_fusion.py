@@ -30,6 +30,12 @@ class DualDroneFusion:
     def fuse_confidence(self, conf1, conf2):
         return 1.0 - (1.0 - conf1) * (1.0 - conf2)
 
+    def fuse_confidence_2(self, conf1, conf2):
+        return (conf1 + conf2) / 2.0
+
+    def fuse_confidence_3(self, conf1, conf2):
+        return max(conf1, conf2)
+
     def prepare_measurements_for_triangulation(self, detections1, detections2, camera1, camera2):
         """Prepare paired measurements for geometric triangulation."""
         from geoconverter import GeoConverter
@@ -146,7 +152,8 @@ class DualDroneFusion:
                 }
             ],
             'person_confidence': fused_person_conf,
-            'has_weapon': det1.has_weapon or det2.has_weapon,
+            #'has_weapon': det1.has_weapon or det2.has_weapon,
+            'has_weapon': fused_weapon_conf >= self.weapon_threshold,
             'weapon_confidence': fused_weapon_conf,
             'bbox_drone1': det1.bbox,
             'bbox_drone2': det2.bbox,

@@ -40,6 +40,73 @@ def frange(start: float, stop: float, step: float) -> list[float]:
     return vals
 
 
+def ray_length_to_target(
+    ox: float,
+    oy: float,
+    ux: float,
+    uy: float,
+    targets: Sequence[tuple[float, float]],
+) -> Optional[float]:
+    """
+    Returns distance along ray (u direction) to the closest target
+    that lies approximately on the bearing ray.
+    """
+    best_t: Optional[float] = None
+
+    for tx, ty in targets:
+        vx = tx - ox
+        vy = ty - oy
+
+        # projection of v onto ray direction
+        t = vx * ux + vy * uy
+        if t <= 0:
+            continue
+
+        # perpendicular distance to ray
+        perp = abs(vx * uy - vy * ux)
+        if perp > 1.0:  # 1 meter tolerance
+            continue
+
+        if best_t is None or t < best_t:
+            best_t = t
+
+    return best_t
+
+
+def ray_distance_to_intersection(
+    ox: float,
+    oy: float,
+    ux: float,
+    uy: float,
+    intersections: Sequence[tuple[float, float]],
+    min_dist: float,
+) -> Optional[float]:
+    """
+    Returns distance along ray to the closest intersection
+    beyond min_dist (monocular point).
+    """
+    best_t = None
+
+    for ix, iy in intersections:
+        vx = ix - ox
+        vy = iy - oy
+
+        # distance along ray
+        t = vx * ux + vy * uy
+        if t <= min_dist:
+            continue
+
+        # perpendicular distance to ray
+        perp = abs(vx * uy - vy * ux)
+        if perp > 1.0:  # 1 m tolerance
+            continue
+
+        if best_t is None or t < best_t:
+            best_t = t
+
+    return best_t
+
+
 def plot_ground_plane(
     *,
     ref_lat: float,
@@ -56,34 +123,17 @@ def plot_ground_plane(
     draw_distance_circles: bool = False,
     ray_length_m: float | None = None,
     ticks: float | None = None,  # interpreted as half-range (meters)
-    # --- alignment (rotation) ---
-    align_drone1_to_north: bool = False,
-    align_mode: str = "target_to_drone1",  # "target_to_drone1" or "drone1_to_target"
     # --- “paper mode” styling ---
     title: str | None = None,
     show_legend: bool = False,
     show_drone_labels: bool = False,
     show_monocular_points: bool = True,
     out_path: Optional[str | Path] = None,
+    distance_info: dict | None = None,
     show: bool = False,
     dpi: int = 300,
     figsize: tuple[float, float] = (3.35, 3.0),  # ~single-column IEEE width
 ):
-    """
-    Publication-oriented ground-plane plot.
-
-    Coordinate conventions:
-      - Local XY uses: +Y = North, +X = East (via GeoConverter.geo_to_xy).
-      - If align_drone1_to_north=True, the entire scene is rotated so that:
-          * align_mode="target_to_drone1": vector (origin -> drone1) points to +Y
-          * align_mode="drone1_to_target": vector (drone1 -> origin) points to +Y
-
-    ticks semantics (as you requested):
-      - ticks=T sets a fixed plot range:
-          X in [-T, +T]
-          Y in [-0.2*T, +T]
-        with 1-meter tick spacing on each axis.
-    """
 
     # Lazy import so non-plot pipeline works without matplotlib.
     import matplotlib
@@ -119,11 +169,6 @@ def plot_ground_plane(
         b = math.radians(float(bearing_deg))
         return (math.sin(b), math.cos(b))
 
-    def rotate_xy(x: float, y: float, theta_rad: float) -> tuple[float, float]:
-        c = math.cos(theta_rad)
-        s = math.sin(theta_rad)
-        return (x * c - y * s, x * s + y * c)
-
     # ---- Collect drone positions (unrotated first) ----
     drone_xy_raw: list[tuple[float, float, str]] = []
     for d in (drone_positions or []):
@@ -137,29 +182,6 @@ def plot_ground_plane(
         if xy is None:
             continue
         drone_xy_raw.append((xy[0], xy[1], str(d.get("label", "UAV"))))
-
-    # ---- Compute rotation so drone1 becomes "0°" (north/up) ----
-    theta = 0.0
-    if align_drone1_to_north and drone_xy_raw:
-        d1 = next((p for p in drone_xy_raw if "1" in p[2]), drone_xy_raw[0])
-        d1x, d1y, _ = d1
-
-        # Note: for north-based coords (+Y), angle from +Y is atan2(x, y)
-        if align_mode == "target_to_drone1":
-            # rotate so (origin -> drone1) points to +Y
-            phi = math.atan2(d1x, d1y)
-            theta = -phi
-        elif align_mode == "drone1_to_target":
-            # rotate so (drone1 -> origin) points to +Y => (-d1x, -d1y) to +Y
-            phi = math.atan2(-d1x, -d1y)
-            theta = -phi
-
-    # Apply rotation to drones
-    if theta != 0.0:
-        drone_xy: list[tuple[float, float, str]] = []
-        for x, y, lbl in drone_xy_raw:
-            rx, ry = rotate_xy(x, y, theta)
-            drone_xy.append((rx, ry, lbl))
     else:
         drone_xy = drone_xy_raw
 
@@ -172,8 +194,6 @@ def plot_ground_plane(
             if xy is None:
                 continue
             x, y = xy
-            if theta != 0.0:
-                x, y = rotate_xy(x, y, theta)
             xs.append(x)
             ys.append(y)
         return xs, ys
@@ -182,6 +202,8 @@ def plot_ground_plane(
     d2_xs, d2_ys = series_to_xy(targets_d2)
     avg_xs, avg_ys = series_to_xy(targets_fused_average)
     bi_xs, bi_ys = series_to_xy(targets_fused_bearing_intersection)
+    bi_targets_xy = list(zip(bi_xs, bi_ys))
+
 
     fig, ax = plt.subplots(figsize=figsize, dpi=int(dpi))
     if title:
@@ -225,7 +247,7 @@ def plot_ground_plane(
         all_y.extend(bi_ys)
 
     # Bearing rays / range circles
-    def draw_measurements(measurements: Sequence[dict] | None, *, color: str):
+    def draw_measurements(measurements: Sequence[dict] | None, *, color: str, intersection_targets: Sequence[tuple[float, float]] = ()):
         if not measurements:
             return
         for m in measurements:
@@ -242,8 +264,6 @@ def plot_ground_plane(
             if origin_xy is None:
                 continue
             ox, oy = origin_xy
-            if theta != 0.0:
-                ox, oy = rotate_xy(ox, oy, theta)
 
             all_x.append(ox)
             all_y.append(oy)
@@ -264,88 +284,157 @@ def plot_ground_plane(
 
             if draw_bearing_rays and bearing is not None:
                 ux, uy = bearing_to_unit_vec(bearing)
-                # rotate the direction vector too (so ray matches rotated plot)
-                if theta != 0.0:
-                    ux, uy = rotate_xy(ux, uy, theta)
 
-                L = (
-                    float(ray_length_m)
-                    if ray_length_m is not None
-                    else (float(dist) if (dist is not None and dist > 0) else 30.0)
+                # ---- solid ray: to monocular estimate ----
+                if dist is not None and dist > 0:
+                    L_solid = float(dist)
+                elif ray_length_m is not None:
+                    L_solid = float(ray_length_m)
+                else:
+                    L_solid = 30.0
+
+                L_solid = max(1.0, L_solid)
+
+                x1, y1 = ox + ux * L_solid, oy + uy * L_solid
+                ax.plot([ox, x1], [oy, y1], c=color, linewidth=1.0, zorder=2)
+
+                all_x.append(x1)
+                all_y.append(y1)
+
+                # ---- dashed continuation: to bearing intersection ----
+                L_dash = ray_distance_to_intersection(
+                    ox,
+                    oy,
+                    ux,
+                    uy,
+                    intersection_targets,
+                    min_dist=L_solid,
                 )
-                L = max(1.0, L)
 
-                x2, y2 = ox + ux * L, oy + uy * L
-                ax.plot([ox, x2], [oy, y2], c=color, linestyle="-", linewidth=1.0, zorder=1)
-                all_x.append(x2)
-                all_y.append(y2)
+                if L_dash is not None:
+                    x2, y2 = ox + ux * L_dash, oy + uy * L_dash
+                    ax.plot(
+                        [x1, x2],
+                        [y1, y2],
+                        c=color,
+                        linewidth=0.9,
+                        linestyle="--",
+                        zorder=1,
+                    )
 
-    draw_measurements(measurements_d1, color=drone1_color)
-    draw_measurements(measurements_d2, color=drone2_color)
+                    all_x.append(x2)
+                    all_y.append(y2)
 
-    # --- Annotate estimated distances and bearings (original bearings, not rotated) ---
-    d1_dist = d1_bearing = d2_dist = d2_bearing = None
-    if measurements_d1 and len(measurements_d1) > 0:
-        d1_dist = _safe_float(measurements_d1[0].get("distance_m"))
-        d1_bearing = _safe_float(measurements_d1[0].get("bearing_deg"))
-    if measurements_d2 and len(measurements_d2) > 0:
-        d2_dist = _safe_float(measurements_d2[0].get("distance_m"))
-        d2_bearing = _safe_float(measurements_d2[0].get("bearing_deg"))
 
-    if (d1_dist is not None and d1_bearing is not None and d2_dist is not None and d2_bearing is not None):
-        annotation_text = (
-            f"Drone 1: {d1_dist:.2f}m\n"
-            f"Drone 2: {d2_dist:.2f}m"
-        )
-        ax.annotate(
-            annotation_text,
-            xy=(0.98, 0.02),
-            xycoords="axes fraction",
-            fontsize=7,
-            color="k",
-            ha="right",
-            va="bottom",
-            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="0.5", alpha=0.8),
-        )
+
+    draw_measurements(
+        measurements_d1,
+        color=drone1_color,
+        intersection_targets=bi_targets_xy,
+    )
+
+    draw_measurements(
+        measurements_d2,
+        color=drone2_color,
+        intersection_targets=bi_targets_xy,
+    )
+
+    # --- Annotate estimated distances  ---
+    d1_pitch = distance_info.get("d1_pitch")
+    d1_pinhole = distance_info.get("d1_pinhole")
+
+    d2_pitch = distance_info.get("d2_pitch")
+    d2_pinhole = distance_info.get("d2_pinhole")
+
+    fused_avg_d1 = distance_info.get("fused_avg_d1")
+    fused_bi_d1  = distance_info.get("fused_bi_d1")
+
+    fused_avg_d2 = distance_info.get("fused_avg_d2")
+    fused_bi_d2  = distance_info.get("fused_bi_d2")
+
+    def fmt(v):
+        return f"{v:.2f} m" if v is not None else "—"
+
+    x_center = 0.5
+    y_base = -0.005        # closer to plot
+    row = 0.03           # tight vertical spacing
+    gap = 0.010           # gap between drones
+    fs_text  = 6.0
+
+    fig.text(
+        x_center, y_base + 3*row,
+        f"UAV1 est. distance: {fmt(d1_pitch)}",
+        fontsize=fs_text,
+        ha="center",
+        va="top",
+        color=drone1_color,
+    )
+
+    fig.text(
+        x_center, y_base + 2*row,
+        f"Fused avg: {fmt(fused_avg_d1)}  |  Fused int: {fmt(fused_bi_d1)}",
+        fontsize=fs_text,
+        ha="center",
+        va="top",
+        color=drone1_color,
+    )
+
+    # -------- Drone 2 --------
+    y2 = y_base + row - gap
+
+    fig.text(
+        x_center, y2 - row,
+        f"UAV2 est. distance: {fmt(d2_pitch)}",
+        fontsize=fs_text,
+        ha="center",
+        va="top",
+        color=drone2_color,
+    )
+
+    fig.text(
+        x_center, y2 - 2*row,
+        f"Fused avg: {fmt(fused_avg_d2)}  |  Fused int: {fmt(fused_bi_d2)}",
+        fontsize=fs_text,
+        ha="center",
+        va="top",
+        color=drone2_color,
+    )
+
+    fig.subplots_adjust(bottom=0.2)
+
 
     ax.set_xlabel("X (meters)")
     ax.set_ylabel("Y (meters)")
     ax.grid(True, linewidth=0.4, alpha=0.5)
     ax.set_aspect("equal", adjustable="box")
 
-    # --- Axis limits (auto, then overridden by ticks if provided) ---
-    if all_x and all_y:
-        max_abs = max(max(map(abs, all_x)), max(map(abs, all_y)))
-        axis_limit = max(15.0, max_abs * 1.15)
-    else:
-        axis_limit = 15.0
+    from matplotlib.ticker import MultipleLocator, FixedLocator
 
-    ax.set_xlim(-axis_limit, axis_limit)
-    ax.set_ylim(-axis_limit, axis_limit)
+    tick_abs = abs(float(ticks))
+    if tick_abs < 1e-9:
+        tick_abs = 1.0
 
-    # --- Fixed axis limits & ticks (your requested behavior) ---
-    if ticks is not None:
-        try:
-            tick_abs = abs(float(ticks))
-            if tick_abs < 1e-9:
-                tick_abs = 1.0
+    # Axis limits
+    ax.set_xlim((int(-tick_abs), int(tick_abs)))
+    ax.set_ylim(int(-.5*tick_abs), int(1.5*tick_abs))
 
-            # Fixed axis range: X symmetric, Y asymmetric
-            ax.set_xlim(-tick_abs, tick_abs)
-            ax.set_ylim(-0.2 * tick_abs, 1.5*tick_abs)
+    # ---- Major ticks: only -tick, 0, +tick ----
+    ax.xaxis.set_major_locator(FixedLocator([-tick_abs, 0.0, tick_abs]))
+    ax.yaxis.set_major_locator(FixedLocator([-tick_abs, 0.0, tick_abs, 1.5*tick_abs]))
 
-            # 1-meter ticks matching each axis bounds
-            x_ticks = list(range(-int(math.floor(tick_abs)), int(math.ceil(tick_abs)) + 1))
-            y_min = int(math.floor(-0.2 * tick_abs))
-            y_max = int(math.ceil(1.5 * tick_abs))
-            y_ticks = list(range(y_min, y_max + 1))
+    # ---- Minor ticks: 1 m grid ----
+    ax.xaxis.set_minor_locator(MultipleLocator(1.0))
+    ax.yaxis.set_minor_locator(MultipleLocator(1.0))
 
-            ax.set_xticks(x_ticks)
-            ax.set_yticks(y_ticks)
+    # ---- Grid ----
+    ax.grid(which="major", linewidth=0.6, alpha=0.8)
+    ax.grid(which="minor", linewidth=0.3, alpha=0.4)
 
-            axis_limit = tick_abs
-        except Exception:
-            pass
+    # Hide minor tick marks (keep grid only)
+    ax.tick_params(which="minor", length=0)
+
+
+
 
     # Legend (optional)
     if show_legend:
