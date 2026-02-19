@@ -4,6 +4,7 @@ import logging
 from ultralytics import YOLO
 from camera import Camera
 
+from geoconverter import GeoConverter
 from position_estimation import estimate_distance, estimate_distance_pitch, estimate_bearing
 
 # Detection and visualization constants
@@ -16,7 +17,7 @@ CROP_PADDING = 0.1  # 10% padding around bounding boxes
 CROP_MIN_SIZE = 32  # Minimum crop size in pixels
 
 try:
-    from weapon_detector import WeaponDetector
+    from pipeline.weapon_detector import WeaponDetector
     WEAPON_DETECTION_AVAILABLE = True
 except ImportError as e:
     WEAPON_DETECTION_AVAILABLE = False
@@ -225,10 +226,7 @@ class PeopleDetector:
         
         return image_with_boxes, detections_info
     
-    def detect_people_with_estimation(self, image_path, image, drone_id):
-    
-        detector = self.pipeline_drone1.detector if drone_id == 1 else self.pipeline_drone2.detector
-        camera = self.camera_drone1 if drone_id == 1 else self.camera_drone2
+    def detect_people_with_estimation(self, image_path, image):
         infer_kwargs = dict(
             imgsz=640,
             iou=0.6,
@@ -236,13 +234,18 @@ class PeopleDetector:
             classes=[0],
             verbose=False,
         )
-        if getattr(detector, "device", None) is not None:
-            infer_kwargs["device"] = getattr(detector, "device")
-        results = detector.model(image, **infer_kwargs)
-        file_data = detector.extract_filename_metadata(image_path)
+        if getattr(self, "device", None) is not None:
+            infer_kwargs["device"] = getattr(self, "device")
+        results = self.model(image, **infer_kwargs)
+        file_data = self.extract_filename_metadata(image_path)
 
-        cam_height_m = file_data.get('cam_height_m')
-        cam_pitch_deg = file_data.get('cam_pitch_deg')
+        # Set camera height and pitch from metadata if available
+        cam_height_m = file_data.get('height_m') if file_data.get('height_m') is not None else file_data.get('cam_height_m')
+        cam_pitch_deg = file_data.get('pitch_deg') if file_data.get('pitch_deg') is not None else file_data.get('cam_pitch_deg')
+        if cam_height_m is not None:
+            self.camera.height_m = cam_height_m
+        if cam_pitch_deg is not None:
+            self.camera.pitch_deg = cam_pitch_deg
 
         detections_info = []
         for result in results:
@@ -258,15 +261,12 @@ class PeopleDetector:
                         x_center = float((x1 + x2) / 2)
 
                         # Always compute pinhole estimate
-                        distance_pinhole_m = estimate_distance(camera, person_height_px) if person_height_px > 0 else None
+                        distance_pinhole_m = estimate_distance(self.camera, person_height_px) if person_height_px > 0 else None
 
-                        # Compute pitch-based estimate only if we have annotated height + pitch
+                        # Compute pitch-based estimate if we have annotated height + pitch
                         distance_pitch_m = None
-                        if cam_height_m is not None and cam_pitch_deg is not None:
-                            # Update camera with annotated values
-                            camera.height_m = cam_height_m
-                            camera.pitch_deg = cam_pitch_deg
-                            distance_pitch_m = estimate_distance_pitch(camera, y_bottom)
+                        if self.camera.height_m is not None and self.camera.pitch_deg is not None:
+                            distance_pitch_m = estimate_distance_pitch(self.camera, y_bottom)
 
                         # Choose primary distance for downstream use
                         if distance_pitch_m is not None:
@@ -279,7 +279,23 @@ class PeopleDetector:
                             distance_m = None
                             distance_method = 'none'
 
-                        bearing_deg = estimate_bearing(camera, x_center)
+                        bearing_deg = estimate_bearing(self.camera, x_center)
+
+                        # Compute geoposition if possible
+                        person_geoposition = None
+                        if self.camera.lat is not None and self.camera.lon is not None and distance_m is not None and bearing_deg is not None:
+                            try:
+                                # print(f"[GeoEstimation DEBUG] lat={self.camera.lat}, lon={self.camera.lon}, distance_m={distance_m}, bearing_deg={bearing_deg}")
+                                # Use GeoConverter to compute new lat/lon from current position, distance, and bearing (polar)
+                                latlon = GeoConverter.polar_to_geo(
+                                    self.camera.lat, self.camera.lon, bearing_deg, distance_m
+                                )
+                                if latlon and latlon[0] is not None and latlon[1] is not None:
+                                    person_geoposition = {"latitude": latlon[0], "longitude": latlon[1]}
+                                else:
+                                    person_geoposition = None
+                            except Exception as e:
+                                self.logger.warning("Failed to compute geoposition: %s", e)
 
                         detections_info.append({
                             'bbox': [int(x1), int(y1), int(x2), int(y2)],
@@ -289,7 +305,8 @@ class PeopleDetector:
                             'distance_pinhole_m': distance_pinhole_m,
                             'distance_pitch_m': distance_pitch_m,
                             'bearing_deg': bearing_deg,
-                            'cam_height_m': cam_height_m,
-                            'cam_pitch_deg': cam_pitch_deg,
+                            'cam_height_m': self.camera.height_m,
+                            'cam_pitch_deg': self.camera.pitch_deg,
+                            'person_geoposition': person_geoposition,
                         })
         return detections_info

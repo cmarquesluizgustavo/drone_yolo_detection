@@ -1,8 +1,8 @@
 import cv2
 import os
 from pathlib import Path
-from people_detector import PeopleDetector
-from detection_statistics import DetectionStatistics
+from pipeline.people_detector import PeopleDetector
+from stats import DetectionStatistics
 import viewer
 
 # File format and processing constants
@@ -44,72 +44,6 @@ class DetectionPipeline:
             'min_area_frac': None,
             'max_area_frac': None,
         }
-
-    def filter_people_detections(self, detections, image_shape):
-        cfg = getattr(self, 'background_person_filter', None) or {}
-        if not cfg.get('enabled'):
-            return detections
-
-        if not detections:
-            return detections
-
-        h, w = image_shape[:2]
-        if h <= 0 or w <= 0:
-            return detections
-
-        region = cfg.get('region')
-        region_px = None
-        if region and len(region) == 4:
-            rx1, ry1, rx2, ry2 = region
-            # Clamp
-            rx1 = max(0.0, min(1.0, float(rx1)))
-            ry1 = max(0.0, min(1.0, float(ry1)))
-            rx2 = max(0.0, min(1.0, float(rx2)))
-            ry2 = max(0.0, min(1.0, float(ry2)))
-            if rx2 > rx1 and ry2 > ry1:
-                region_px = (rx1 * w, ry1 * h, rx2 * w, ry2 * h)
-
-        min_area = cfg.get('min_area_frac')
-        max_area = cfg.get('max_area_frac')
-        img_area = float(w * h)
-
-        def _inside_region(cx, cy, reg):
-            x1p, y1p, x2p, y2p = reg
-            return (cx >= x1p) and (cx <= x2p) and (cy >= y1p) and (cy <= y2p)
-
-        kept = []
-        for d in detections:
-            try:
-                x1, y1, x2, y2 = d.get('bbox') if isinstance(d, dict) else None
-            except Exception:
-                x1 = y1 = x2 = y2 = None
-
-            if x1 is None:
-                kept.append(d)
-                continue
-
-            bw = max(0.0, float(x2) - float(x1))
-            bh = max(0.0, float(y2) - float(y1))
-            area_frac = (bw * bh / img_area) if img_area > 0 else 0.0
-            cx = (float(x1) + float(x2)) / 2.0
-            cy = (float(y1) + float(y2)) / 2.0
-
-            drop = False
-
-            # Region-based filtering (common for background person walking on edge).
-            if region_px is not None and _inside_region(cx, cy, region_px):
-                drop = True
-
-            # Size-based filtering (background people are often much smaller).
-            if (min_area is not None) and (area_frac < float(min_area)):
-                drop = True
-            if (max_area is not None) and (area_frac > float(max_area)):
-                drop = True
-
-            if not drop:
-                kept.append(d)
-
-        return kept
     
     def extract_person_crops(self, image, detections_info):
         crops = []
@@ -318,14 +252,6 @@ class DetectionPipeline:
                 
                 # Use detector to detect people
                 _, detections = self.detector.detect_people(image_path, draw_boxes=False)
-
-                # Optional: filter out known background people before any downstream steps.
-                detections = self.filter_people_detections(
-                    detections,
-                    original_image.shape,
-                    sample_name=dir_name,
-                    frame_path=image_path,
-                )
 
                 # Extract testing-time condition metadata from filenames (used for RMSE comparisons).
                 file_data = self.detector.extract_filename_metadata(image_path)

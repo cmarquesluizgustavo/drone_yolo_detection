@@ -10,7 +10,7 @@ class WeaponDetector:
     def __init__(self, model_path: str = None, weapon_confidence_threshold: float = 0.5, device=None):
         if model_path is None:
             current_dir = Path(__file__).parent
-            model_path = current_dir.parent / "models" / "weapons" / "best.pt"
+            model_path = current_dir.parent.parent / "models" / "weapons" / "best.pt"
 
         self.model_path = model_path
         self.weapon_confidence_threshold = weapon_confidence_threshold

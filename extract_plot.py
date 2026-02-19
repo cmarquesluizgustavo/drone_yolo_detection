@@ -2,8 +2,10 @@ import os
 import shutil
 
 def move_ground_gps_plots():
-    base_dir = "/home/caio.torkst/Downloads/drone_yolo_detection/output/detections"
-    plots_base = "/home/caio.torkst/Downloads/drone_yolo_detection/output/plots"
+    # base_dir = "/home/caio.torkst/Downloads/drone_yolo_detection/output/detections"
+    # plots_base = "/home/caio.torkst/Downloads/drone_yolo_detection/output/plots"
+    base_dir = "output/detections"
+    plots_base = "output/plots"
     for angle in ["angle_45", "angle_90"]:
         angle_num = angle.split('_')[1]
         fused_dir = os.path.join(base_dir, angle, "fused_detections")

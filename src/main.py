@@ -9,8 +9,8 @@ from pathlib import Path
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from detection_pipeline import DetectionPipeline
-from dual_drone_pipeline import DualDroneDetectionPipeline
+from pipeline.single_pipeline import DetectionPipeline
+from pipeline.dual_pipeline import DualDronePipeline
 
 
 def _parse_log_level(level: str) -> int:
@@ -278,7 +278,7 @@ def main():
                 return 1
             
             # Initialize dual-drone pipeline
-            pipeline = DualDroneDetectionPipeline(
+            pipeline = DualDronePipeline(
                 args.model, 
                 person_confidence_threshold=args.person_confidence,
                 enable_weapon_detection=enable_weapons,
@@ -297,7 +297,7 @@ def main():
             pipeline.enable_ground_plane_plot = bool(args.ground_plane_plot)
             
             # Process dual-drone samples
-            pipeline.process_dual_drone_samples(
+            pipeline.process_all_samples(
                 args.input_drone1,
                 args.input_drone2,
                 args.output,

@@ -105,7 +105,6 @@ class Camera:
                         continue
                     key, value = line.strip().split(':', 1)
                     key, value = key.strip(), value.strip()
-                    
                     try:
                         if key == 'pitch':
                             self.pitch_deg = -float(value)
@@ -120,6 +119,10 @@ class Camera:
                     except ValueError:
                         continue
 
+            # Debug print for loaded telemetry
+            # print(f"[Camera Telemetry] Loaded for {txt_path}: lat={self.lat}, lon={self.lon}, yaw={self.yaw_deg}, pitch={self.pitch_deg}, roll={self.roll_deg}")
+            # if self.lat == 0.0 or self.lon == 0.0:
+            #     print(f"[Camera Telemetry WARNING] lat/lon is zero for {txt_path}")
             return True
         except Exception as e:
             print(f"Error loading telemetry from {txt_path}: {e}")
