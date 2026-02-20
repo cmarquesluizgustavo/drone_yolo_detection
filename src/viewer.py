@@ -475,55 +475,55 @@ def draw_bbox(frame, tracks, show_confidence=False, tracks_extra_lines=None):
 
 def draw_boxes_fusion(image, detections, weapon_results, drone_label, fused_detections=None, drone_id=None, show_confidence=False):
     tracks = tracks_from_detections(detections, weapon_results, track_id_start=1)
-    
-    # Build extra_lines per track with fused stats
+    # ...existing code...
+    # Fused info commented out: only single detection info is shown
     tracks_extra_lines = {}
-    if fused_detections and drone_id is not None:
-        bbox_key = f'bbox_drone{drone_id}'
-        for track_idx, det in enumerate(detections):
-            det_bbox = det.get('bbox')
-            if det_bbox is None:
-                continue
-            # Find matching fused detections (both methods)
-            matched_fused = []
-            for fd in fused_detections:
-                fused_bbox = fd.get(bbox_key) or fd.get('bbox')
-                if fused_bbox is not None and list(fused_bbox) == list(det_bbox):
-                    matched_fused.append(fd)
-            if not matched_fused:
-                continue
-            extra = []
-            extra.append(("--- Fused ---", color_text_title))
-            for fd in matched_fused:
-                method = fd.get('source', '')
-                fused_conf = fd.get('person_confidence', 0.0)
-                # Show fused confidence in overlay
-                extra.append((f"Fused Confidence: {fused_conf:.3f}", (0, 0, 255)))
-                extra.append((f"{method} Conf: {fused_conf:.3f}", color_text_body))
-                # Fused positions
-                geo_avg = fd.get('fused_geoposition_average')
-                geo_bi = fd.get('fused_geoposition_bearing_intersection')
-                if geo_avg:
-                    flat = geo_avg.get('latitude', 0.0)
-                    flon = geo_avg.get('longitude', 0.0)
-                    extra.append((f"Avg Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
-                if geo_bi:
-                    flat = geo_bi.get('latitude', 0.0)
-                    flon = geo_bi.get('longitude', 0.0)
-                    extra.append((f"Tri Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
-                # Fused distances (from this drone to each fused position)
-                dist_avg = fd.get(f'distance_drone{drone_id}_average_m')
-                dist_bi = fd.get(f'distance_drone{drone_id}_bearing_intersection_m')
-                if dist_avg is not None:
-                    extra.append((f"Avg Dist: {dist_avg:.1f}m", color_text_body))
-                if dist_bi is not None:
-                    extra.append((f"Tri Dist: {dist_bi:.1f}m", color_text_body))
-                # Fused weapon info
-                fused_has_weapon = fd.get('has_weapon', False)
-                fused_weapon_conf = fd.get('weapon_confidence', 0.0)
-                if fused_has_weapon:
-                    extra.append((f"Fused ARMADO Conf: {fused_weapon_conf:.3f}", color_text_weapon))
-            tracks_extra_lines[track_idx] = extra
+    # if fused_detections and drone_id is not None:
+    #     bbox_key = f'bbox_drone{drone_id}'
+    #     for track_idx, det in enumerate(detections):
+    #         det_bbox = det.get('bbox')
+    #         if det_bbox is None:
+    #             continue
+    #         # Find matching fused detections (both methods)
+    #         matched_fused = []
+    #         for fd in fused_detections:
+    #             fused_bbox = fd.get(bbox_key) or fd.get('bbox')
+    #             if fused_bbox is not None and list(fused_bbox) == list(det_bbox):
+    #                 matched_fused.append(fd)
+    #         if not matched_fused:
+    #             continue
+    #         extra = []
+    #         extra.append(("--- Fused ---", color_text_title))
+    #         for fd in matched_fused:
+    #             method = fd.get('source', '')
+    #             fused_conf = fd.get('person_confidence', 0.0)
+    #             # Show fused confidence in overlay
+    #             extra.append((f"Fused Confidence: {fused_conf:.3f}", (0, 0, 255)))
+    #             extra.append((f"{method} Conf: {fused_conf:.3f}", color_text_body))
+    #             # Fused positions
+    #             geo_avg = fd.get('fused_geoposition_average')
+    #             geo_bi = fd.get('fused_geoposition_bearing_intersection')
+    #             if geo_avg:
+    #                 flat = geo_avg.get('latitude', 0.0)
+    #                 flon = geo_avg.get('longitude', 0.0)
+    #                 extra.append((f"Avg Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
+    #             if geo_bi:
+    #                 flat = geo_bi.get('latitude', 0.0)
+    #                 flon = geo_bi.get('longitude', 0.0)
+    #                 extra.append((f"Tri Lat:{flat:.6f} Lon:{flon:.6f}", color_text_body))
+    #             # Fused distances (from this drone to each fused position)
+    #             dist_avg = fd.get(f'distance_drone{drone_id}_average_m')
+    #             dist_bi = fd.get(f'distance_drone{drone_id}_bearing_intersection_m')
+    #             if dist_avg is not None:
+    #                 extra.append((f"Avg Dist: {dist_avg:.1f}m", color_text_body))
+    #             if dist_bi is not None:
+    #                 extra.append((f"Tri Dist: {dist_bi:.1f}m", color_text_body))
+    #             # Fused weapon info
+    #             fused_has_weapon = fd.get('has_weapon', False)
+    #             fused_weapon_conf = fd.get('weapon_confidence', 0.0)
+    #             if fused_has_weapon:
+    #                 extra.append((f"Fused ARMADO Conf: {fused_weapon_conf:.3f}", color_text_weapon))
+    #         tracks_extra_lines[track_idx] = extra
     
     img_annotated = draw_bbox(
         image, tracks,
@@ -531,7 +531,7 @@ def draw_boxes_fusion(image, detections, weapon_results, drone_label, fused_dete
         tracks_extra_lines=tracks_extra_lines,
     )
 
-    # Keep a simple top label for the side-by-side fused visualization.
+    # Keep a simple top label for the visualization.
     cv2.putText(img_annotated, drone_label, (20, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (255, 255, 0), 2)
     return img_annotated

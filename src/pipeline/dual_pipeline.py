@@ -797,9 +797,16 @@ class DualDronePipeline:
                 if wdets2:
                     w2_conf = max(w.get("weapon_confidence", w.get("confidence", 0.0)) for w in wdets2)
 
+        # Permitir comparação de diferentes métodos de fuse_confidence
         if getattr(self, "verbose", False):
-            w_fused = self.fusion.fuse_confidence(w1_conf, w2_conf)
-            self.per_frame_output(best_det1, best_det2, fused_detections, w1_conf, w2_conf, w_fused)
+            w_fused_1 = self.fusion.fuse_confidence(w1_conf, w2_conf)
+            w_fused_2 = self.fusion.fuse_confidence_2(w1_conf, w2_conf)
+            w_fused_3 = self.fusion.fuse_confidence_3(w1_conf, w2_conf)
+            print("Comparação métodos de fuse_confidence:")
+            print(f"  Método 1 (1-(1-c1)*(1-c2)): {w_fused_1:.3f}")
+            print(f"  Método 2 (média):           {w_fused_2:.3f}")
+            print(f"  Método 3 (máximo):          {w_fused_3:.3f}")
+            self.per_frame_output(best_det1, best_det2, fused_detections, w1_conf, w2_conf, w_fused_1)
 
         # Individual drone stats (using only best detection)
         # Construct distance_estimates for Drone 1

@@ -340,31 +340,51 @@ class DetectionStatistics:
             if rmse is not None:
                 print(f"{method.upper():<10}: {rmse:.3f} m")
 
-        # --- Fused (overall) ---
-        rmse_fused = self.compute_rmse_filtered(method="fused")
-        if rmse_fused is not None:
-            print(f"{'FUSED':<10}: {rmse_fused:.3f} m")
+        # --- Fused (all metrics, all confidence fusion methods) ---
+        print("\nFUSED METRICS COMPARISON (confidence fusion methods)")
+        fusion_methods = [
+            (None, "Método 1: 1-(1-c1)*(1-c2)"),
+            ("mean", "Método 2: Média"),
+            ("max", "Método 3: Máximo")
+        ]
+        for fusion_method, label in fusion_methods:
+            # Gather confusion counts for this method
+            tp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_method") == fusion_method and p.get("detected") and p.get("ground_truth"))
+            fp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_method") == fusion_method and p.get("detected") and not p.get("ground_truth"))
+            tn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_method") == fusion_method and not p.get("detected") and not p.get("ground_truth"))
+            fn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_method") == fusion_method and not p.get("detected") and p.get("ground_truth"))
+            acc, prec, rec, f1 = self.calculate_metrics(tp, tn, fp, fn)
+            rmse_fused = self.compute_rmse_filtered(method="fused", fusion_method=fusion_method)
+            print(f"{label:<30}: Acc={acc:.3f} Prec={prec:.3f} Rec={rec:.3f} F1={f1:.3f} RMSE={rmse_fused if rmse_fused is not None else 'N/A'}")
 
-        # --- Fused breakdown ---
-        print("\nFUSED RMSE BREAKDOWN")
-
+        # --- Fused breakdown by type and method ---
+        print("\nFUSED METRICS BREAKDOWN (por método de confiança)")
         for fusion_type in ["avg", "bi"]:
-            rmse_ft = self.compute_rmse_filtered(
-                method="fused",
-                fusion_type=fusion_type,
-            )
-            if rmse_ft is not None:
-                print(f"  {fusion_type.upper():<4} (all): {rmse_ft:.3f} m")
-
-            for src in ["d1", "d2", "all"]:
-                rmse_src = self.compute_rmse_filtered(
+            for fusion_method, label in fusion_methods:
+                # Gather confusion counts for this method/type
+                tp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("detected") and p.get("ground_truth"))
+                fp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("detected") and not p.get("ground_truth"))
+                tn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and not p.get("detected") and not p.get("ground_truth"))
+                fn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and not p.get("detected") and p.get("ground_truth"))
+                acc, prec, rec, f1 = self.calculate_metrics(tp, tn, fp, fn)
+                rmse_ft = self.compute_rmse_filtered(
                     method="fused",
                     fusion_type=fusion_type,
-                    d_source=src,
+                    fusion_method=fusion_method,
                 )
-                if rmse_src is not None:
-                    print(
-                        f"    {fusion_type.upper():<4} {src.upper():<3}: {rmse_src:.3f} m"
-                    )
+                print(f"  {fusion_type.upper():<4} {label:<25}: Acc={acc:.3f} Prec={prec:.3f} Rec={rec:.3f} F1={f1:.3f} RMSE={rmse_ft if rmse_ft is not None else 'N/A'}")
 
+                for src in ["d1", "d2", "all"]:
+                    tp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("d_source") == src and p.get("detected") and p.get("ground_truth"))
+                    fp = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("d_source") == src and p.get("detected") and not p.get("ground_truth"))
+                    tn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("d_source") == src and not p.get("detected") and not p.get("ground_truth"))
+                    fn = sum(1 for p in self.rmse_pairs if p.get("method") == "fused" and p.get("fusion_type") == fusion_type and p.get("fusion_method") == fusion_method and p.get("d_source") == src and not p.get("detected") and p.get("ground_truth"))
+                    acc, prec, rec, f1 = self.calculate_metrics(tp, tn, fp, fn)
+                    rmse_src = self.compute_rmse_filtered(
+                        method="fused",
+                        fusion_type=fusion_type,
+                        d_source=src,
+                        fusion_method=fusion_method,
+                    )
+                    print(f"    {fusion_type.upper():<4} {label:<25} {src.upper():<3}: Acc={acc:.3f} Prec={prec:.3f} Rec={rec:.3f} F1={f1:.3f} RMSE={rmse_src if rmse_src is not None else 'N/A'}")
         print("\n" + "=" * 60)
