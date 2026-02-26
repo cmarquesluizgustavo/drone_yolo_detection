@@ -112,6 +112,8 @@ def tracks_from_detections(detections_info, weapon_results=None, track_id_start=
             distance = det.get('distance_pitch_m')
         if distance is None:
             distance = det.get('distance_pinhole_m')
+        if distance is None:
+            distance = det.get('distance_fused_m')
 
         # Geo fields come from different keys depending on pipeline.
         lat = det.get('lat')

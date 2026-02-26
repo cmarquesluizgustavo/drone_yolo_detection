@@ -8,8 +8,9 @@ from camera import Camera
 from stats import DetectionStatistics
 from position_estimation import (
     distance_from_geoposition,
-    fuse_average_target_positions_from_distance_bearing,
-    triangulate_target_by_bearing_intersection,
+    fuse_avg_position_from_distance_bearing,
+    fuse_avg_position_from_distance_bearing_weighted,
+    fuse_triangulate_position_from_bearing_intersection
 )
 import viewer
 from plots import plot_ground_plane, build_series_from_frame
@@ -79,11 +80,15 @@ class DualDronePipeline:
     ):
         best_fused_avg = next((d for d in fused_detections if d.get("source") == "fused_average"), None)
         best_fused_bi = next((d for d in fused_detections if d.get("source") == "fused_bearing_intersection"), None)
+        best_fused_weighted_avg = next((d for d in fused_detections if d.get("source") == "fused_weighted_average"), None)
+        # bets_fused_weighted_bi = next((d for d in fused_detections if d.get("source") == "fused_weighted_bearing_intersection"), None)
 
         d1_h = det1.get("distance_pinhole_m") if det1 else None
         d1_t = det1.get("distance_pitch_m") if det1 else None
+        d1_f = det1.get("distance_fused_m") if det1 else None
         d2_h = det2.get("distance_pinhole_m") if det2 else None
         d2_t = det2.get("distance_pitch_m") if det2 else None
+        d2_f = det2.get("distance_fused_m") if det2 else None
 
         geo1 = det1.get("person_geoposition") if det1 else None
         geo2 = det2.get("person_geoposition") if det2 else None
@@ -98,6 +103,15 @@ class DualDronePipeline:
         d1_fused_bi = best_fused_bi.get("distance_drone1_bearing_intersection_m") if best_fused_bi else None
         d2_fused_bi = best_fused_bi.get("distance_drone2_bearing_intersection_m") if best_fused_bi else None
 
+        geo_weighted_fused_avg = best_fused_weighted_avg.get("fused_geoposition_weighted_average") if best_fused_weighted_avg else None
+        d1_weighted_fused_avg = best_fused_weighted_avg.get("distance_drone1_weighted_average_m") if best_fused_weighted_avg else None
+        d2_weighted_fused_avg = best_fused_weighted_avg.get("distance_drone2_weighted_average_m") if best_fused_weighted_avg else None
+        
+        # geo_weighted_fused_bi = bets_fused_weighted_bi.get("fused_geoposition_weighted_bearing_intersection") if bets_fused_weighted_bi else None
+        # d1_weighted_fused_bi = bets_fused_weighted_bi.get("distance_drone1_weighted_bearing_intersection_m") if bets_fused_weighted_bi else None
+        # d2_weighted_fused_bi = bets_fused_weighted_bi.get("distance_drone2_weighted_bearing_intersection_m") if bets_fused_weighted_bi else None
+
+
         def fmt(val):
             return f"{val:.2f}" if val is not None else "None"
 
@@ -110,8 +124,10 @@ class DualDronePipeline:
             "DISTANCE: "
             f"dist1_height-based={fmt(d1_h)}, "
             f"dist1_pitch-based={fmt(d1_t)}, "
+            f"dist1_fused={fmt(d1_f)}, "
             f"dist2_height-based={fmt(d2_h)}, "
             f"dist2_pitch-based={fmt(d2_t)}, "
+            f"dist2_fused={fmt(d2_f)}, "
             f"geoposition_drone1={fmt_geo(geo1)}, " # this geopositions use only the pitch-based.
             f"geoposition_drone2={fmt_geo(geo2)}"
         )
@@ -127,6 +143,18 @@ class DualDronePipeline:
             f"dist2_from_fused_bi={fmt(d2_fused_bi)}, "
             f"geoposition_fused_bi={fmt_geo(geo_fused_bi)}"
         )
+        print(
+            "FUSED_WEIGHTED_AVERAGE: "
+            f"dist1_from_weighted_fused_avg={fmt(d1_weighted_fused_avg)}, "
+            f"dist2_from_weighted_fused_avg={fmt(d2_weighted_fused_avg)}, "
+            f"geoposition_fused_weighted_avg={fmt_geo(geo_weighted_fused_avg)}"
+        )
+        # print(
+        #     "FUSED_WEIGHTED_BEARING_INTERSECTION: "
+        #     f"dist1_from_weighted_fused_bi={fmt(d1_weighted_fused_bi)}, "
+        #     f"dist2_from_weighted_fused_bi={fmt(d2_weighted_fused_bi)}, "
+        #     f"geoposition_fused_weighted_bi={fmt_geo(geo_weighted_fused_bi)}"
+        # )
         print(
             "DETECTION: "
             f"w1={fmt(w1_conf)}, "
@@ -365,21 +393,22 @@ class DualDronePipeline:
                             fused_lon = None
 
                             # Prefer bearing-intersection fused position if present
-                            bi_list = gps.get("targets_fused_bearing_intersection") or []
-                            if len(bi_list) > 0:
+
+                            avg_list = gps.get("targets_fused_average") or []
+                            if len(avg_list) > 0:
                                 try:
-                                    fused_lat = float(bi_list[-1][0])
-                                    fused_lon = float(bi_list[-1][1])
+                                    fused_lat = float(avg_list[-1][0])
+                                    fused_lon = float(avg_list[-1][1])
                                 except Exception:
                                     fused_lat, fused_lon = None, None
 
                             # Otherwise fall back to fused average
                             if fused_lat is None or fused_lon is None:
-                                avg_list = gps.get("targets_fused_average") or []
-                                if len(avg_list) > 0:
+                                bi_list = gps.get("targets_fused_bearing_intersection") or []
+                                if len(bi_list) > 0:
                                     try:
-                                        fused_lat = float(avg_list[-1][0])
-                                        fused_lon = float(avg_list[-1][1])
+                                        fused_lat = float(bi_list[-1][0])
+                                        fused_lon = float(bi_list[-1][1])
                                     except Exception:
                                         fused_lat, fused_lon = None, None
 
@@ -404,6 +433,8 @@ class DualDronePipeline:
                                 targets_2=gps.get("targets_d2"),
                                 targets_fused_avg=gps.get("targets_fused_average"),
                                 targets_fused_bi=gps.get("targets_fused_bearing_intersection"),
+                                targets_fused_wavg=gps.get("targets_fused_weighted_average"),
+                                #targets_fused_wbi=gps.get("targets_fused_weighted_bearing_intersection"),
                                 measurements_1=gps.get("measurements_d1"),
                                 measurements_2=gps.get("measurements_d2"),
                                 distance_info=dist,
@@ -572,10 +603,10 @@ class DualDronePipeline:
 
         measurement_groups = self.fusion.matching(dets1_obj, dets2_obj, self.camera_drone1, self.camera_drone2)
 
-        print(f"[DEBUG] measurement_groups count: {len(measurement_groups)}")
-        for idx, g in enumerate(measurement_groups):
-            ms = g.get("drone_measurements", [])
-            print(f"[DEBUG] measurement_group[{idx}] drone_measurements count: {len(ms)}")
+        # print(f"[DEBUG] measurement_groups count: {len(measurement_groups)}")
+        # for idx, g in enumerate(measurement_groups):
+        #     ms = g.get("drone_measurements", [])
+        #     print(f"[DEBUG] measurement_group[{idx}] drone_measurements count: {len(ms)}")
 
         for g in measurement_groups:
             ms = g.get("drone_measurements", [])
@@ -586,25 +617,41 @@ class DualDronePipeline:
             bbox1 = g.get("bbox_drone1")
             bbox2 = g.get("bbox_drone2")
 
+            print(f"BBOX1: {bbox1}, BBOX2: {bbox2}")
+
             d1 = ms[0]
             d2 = ms[1]
 
-            avg_latlon = fuse_average_target_positions_from_distance_bearing(
+            print(f"conf1: {d1['person_confidence']}, dist1: {d1['distance']}, bearing1: {d1['bearing']}")
+            print(f"conf2: {d2['person_confidence']}, dist2: {d2['distance']}, bearing2: {d2['bearing']}")
+
+            avg_latlon = fuse_avg_position_from_distance_bearing(
                 self.camera_drone1, d1["distance"], d1["bearing"],
                 self.camera_drone2, d2["distance"], d2["bearing"],
             )
-            print(f"[DEBUG] avg_latlon: {avg_latlon}")
+            #print(f"[DEBUG] avg_latlon: {avg_latlon}")
 
-            tri_latlon = triangulate_target_by_bearing_intersection(
+            tri_latlon = fuse_triangulate_position_from_bearing_intersection(
                 self.camera_drone1, d1["bearing"],
                 self.camera_drone2, d2["bearing"],
             )
-            print(f"[DEBUG] tri_latlon: {tri_latlon}")
+            #print(f"[DEBUG] tri_latlon: {tri_latlon}")
 
             # IMPORTANT: weapon/person confidence & has_weapon come from detection_fusion.py
             fused_person_conf = g.get("person_confidence", 0.0)
             fused_weapon_conf = g.get("weapon_confidence", 0.0)
             fused_has_weapon = g.get("has_weapon", False)
+
+            weighted_avg_latlon = fuse_avg_position_from_distance_bearing_weighted(
+                self.camera_drone1, d1["distance"], d1["bearing"], bbox1, d1["person_confidence"],
+                self.camera_drone2, d2["distance"], d2["bearing"], bbox2, d2["person_confidence"]
+            )
+            #print(f"[DEBUG] weighted_avg_latlon: {weighted_avg_latlon}")
+
+            # weighted_tri_latlon = fuse_triangulate_position_from_bearing_intersection_weighted(
+            #     self.camera_drone1, d1["distance"], d1["bearing"], bbox1, d1["person_confidence"],
+            #     self.camera_drone2, d2["distance"], d2["bearing"], bbox2, d2["person_confidence"]
+            # )
 
             # Average method result
             avg_dist1 = distance_from_geoposition(self.camera_drone1, avg_latlon[0], avg_latlon[1])
@@ -622,20 +669,62 @@ class DualDronePipeline:
             })
 
             # Bearing intersection method result
-            if tri_latlon is not None:
-                tri_dist1 = distance_from_geoposition(self.camera_drone1, tri_latlon[0], tri_latlon[1])
-                tri_dist2 = distance_from_geoposition(self.camera_drone2, tri_latlon[0], tri_latlon[1])
-                fused_detections.append({
-                    "bbox_drone1": bbox1,
-                    "bbox_drone2": bbox2,
-                    "person_confidence": fused_person_conf,
-                    "has_weapon": fused_has_weapon,
-                    "weapon_confidence": float(fused_weapon_conf),
-                    "fused_geoposition_bearing_intersection": {"latitude": tri_latlon[0], "longitude": tri_latlon[1]},
-                    "distance_drone1_bearing_intersection_m": tri_dist1,
-                    "distance_drone2_bearing_intersection_m": tri_dist2,
-                    "source": "fused_bearing_intersection",
-                })
+            tri_dist1 = distance_from_geoposition(self.camera_drone1, tri_latlon[0], tri_latlon[1])
+            tri_dist2 = distance_from_geoposition(self.camera_drone2, tri_latlon[0], tri_latlon[1])
+            fused_detections.append({
+                "bbox_drone1": bbox1,
+                "bbox_drone2": bbox2,
+                "person_confidence": fused_person_conf,
+                "has_weapon": fused_has_weapon,
+                "weapon_confidence": float(fused_weapon_conf),
+                "fused_geoposition_bearing_intersection": {"latitude": tri_latlon[0], "longitude": tri_latlon[1]},
+                "distance_drone1_bearing_intersection_m": tri_dist1,
+                "distance_drone2_bearing_intersection_m": tri_dist2,
+                "source": "fused_bearing_intersection",
+            })
+
+            weighted_avg_dist1 = distance_from_geoposition(self.camera_drone1, weighted_avg_latlon[0], weighted_avg_latlon[1])
+            weighted_avg_dist2 = distance_from_geoposition(self.camera_drone2, weighted_avg_latlon[0], weighted_avg_latlon[1])
+
+            fused_detections.append({
+                "bbox_drone1": bbox1,
+                "bbox_drone2": bbox2,
+                "person_confidence": fused_person_conf,
+                "has_weapon": fused_has_weapon,
+                "weapon_confidence": float(fused_weapon_conf),
+
+                "fused_geoposition_weighted_average": {
+                    "latitude": weighted_avg_latlon[0],
+                    "longitude": weighted_avg_latlon[1]
+                },
+
+                "distance_drone1_weighted_average_m": weighted_avg_dist1,
+                "distance_drone2_weighted_average_m": weighted_avg_dist2,
+
+                "source": "fused_weighted_average"
+            })
+
+            # weighted_tri_dist1 = distance_from_geoposition(self.camera_drone1, weighted_tri_latlon[0], weighted_tri_latlon[1])
+            # weighted_tri_dist2 = distance_from_geoposition(self.camera_drone2, weighted_tri_latlon[0], weighted_tri_latlon[1])
+
+            # fused_detections.append({
+            #     "bbox_drone1": bbox1,
+            #     "bbox_drone2": bbox2,
+            #     "person_confidence": fused_person_conf,
+            #     "has_weapon": fused_has_weapon,
+            #     "weapon_confidence": float(fused_weapon_conf),
+
+            #     "fused_geoposition_weighted_bearing_intersection": {
+            #         "latitude": weighted_tri_latlon[0],
+            #         "longitude": weighted_tri_latlon[1]
+            #     },
+
+            #     "distance_drone1_weighted_bearing_intersection_m": weighted_tri_dist1,
+            #     "distance_drone2_weighted_bearing_intersection_m": weighted_tri_dist2,
+
+            #     "source": "fused_weighted_bearing_intersection"
+            # })
+
 
 
         # Extract fused pairs for distance estimates
@@ -655,6 +744,23 @@ class DualDronePipeline:
             (d["distance_drone2_bearing_intersection_m"], d["distance_drone1_bearing_intersection_m"])
             for d in fused_detections if d.get("source") == "fused_bearing_intersection"
         ]
+        fused_weighted_avg_d1 = [
+            (d["distance_drone1_weighted_average_m"], d["distance_drone2_weighted_average_m"])
+            for d in fused_detections if d.get("source") == "fused_weighted_average"
+        ]
+        fused_weighted_avg_d2 = [
+            (d["distance_drone2_weighted_average_m"], d["distance_drone1_weighted_average_m"])
+            for d in fused_detections if d.get("source") == "fused_weighted_average"
+        ]
+        # fused_weighted_tri_d1 = [
+        #     (d["distance_drone1_weighted_bearing_intersection_m"], d["distance_drone2_weighted_bearing_intersection_m"])
+        #     for d in fused_detections if d.get("source") == "fused_weighted_bearing_intersection"
+        # ]
+        # fused_weighted_tri_d2 = [
+        #     (d["distance_drone2_weighted_bearing_intersection_m"], d["distance_drone1_weighted_bearing_intersection_m"])
+        #     for d in fused_detections if d.get("source") == "fused_weighted_bearing_intersection"
+        # ]
+
 
         # Ground-plane points for this frame
         try:
@@ -667,7 +773,7 @@ class DualDronePipeline:
                 detections2=detections2,
                 fused_detections=[
                     d for d in (fused_detections or [])
-                    if isinstance(d, dict) and d.get("source") in ("fused_average", "fused_bearing_intersection")
+                    if isinstance(d, dict) and d.get("source") in ("fused_average", "fused_bearing_intersection", "fused_weighted_average")#, "fused_weighted_bearing_intersection")
                 ],
             )
         except Exception:
@@ -676,7 +782,7 @@ class DualDronePipeline:
         # Verbose output for fusion (fixed source labels)
         if self.verbose or (frame_idx % 10 == 0):
             fused_count = len(
-                [d for d in fused_detections if d.get("source") in ("fused_average", "fused_bearing_intersection")]
+                [d for d in fused_detections if d.get("source") in ("fused_average", "fused_bearing_intersection", "fused_weighted_average")]#, "fused_weighted_bearing_intersection")]
             )
             print(f"      Frame {frame_idx}: Fused {fused_count} detections from both drones, total {len(fused_detections)} detections")
 
@@ -712,7 +818,7 @@ class DualDronePipeline:
         else:
             has_weapon_gt = sample_name.lower().startswith("real")
 
-        weapons_fused = sum(1 for d in fused_detections if d.get("has_weapon", False))
+        #weapons_fused = sum(1 for d in fused_detections if d.get("has_weapon", False))
 
         sample_class = (
             sample_meta.get("sample_class")
@@ -751,6 +857,8 @@ class DualDronePipeline:
         pairs2_pitch = []
         pairs1_primary = []
         pairs2_primary = []
+        pairs1_fused = []
+        pairs2_fused = []
 
         if real_distance is not None:
             if best_det1:
@@ -760,6 +868,8 @@ class DualDronePipeline:
                     pairs1_p.append((best_det1["distance_pinhole_m"], real_distance))
                 if best_det1.get("distance_pitch_m") is not None:
                     pairs1_pitch.append((best_det1["distance_pitch_m"], real_distance))
+                if best_det1.get("distance_fused_m") is not None:
+                    pairs1_fused.append((best_det1["distance_fused_m"], real_distance))
             if best_det2:
                 if best_det2.get("distance_m") is not None:
                     pairs2_primary.append((best_det2["distance_m"], real_distance))
@@ -767,6 +877,8 @@ class DualDronePipeline:
                     pairs2_p.append((best_det2["distance_pinhole_m"], real_distance))
                 if best_det2.get("distance_pitch_m") is not None:
                     pairs2_pitch.append((best_det2["distance_pitch_m"], real_distance))
+                if best_det2.get("distance_fused_m") is not None:
+                    pairs2_fused.append((best_det2["distance_fused_m"], real_distance))
 
         # Weapon detection for best detection only
         weapons_detected_d1_best = 0
@@ -802,8 +914,8 @@ class DualDronePipeline:
             w_fused_1 = self.fusion.fuse_confidence(w1_conf, w2_conf)
             w_fused_2 = self.fusion.fuse_confidence_2(w1_conf, w2_conf)
             w_fused_3 = self.fusion.fuse_confidence_3(w1_conf, w2_conf)
-            print("Comparação métodos de fuse_confidence:")
-            print(f"  Método 1 (1-(1-c1)*(1-c2)): {w_fused_1:.3f}")
+            print("Comparação métodos de WEAPON fusion:")
+            print(f"  Método 1 (1-(1-wc1)*(1-wc2)): {w_fused_1:.3f}")
             print(f"  Método 2 (média):           {w_fused_2:.3f}")
             print(f"  Método 3 (máximo):          {w_fused_3:.3f}")
             self.per_frame_output(best_det1, best_det2, fused_detections, w1_conf, w2_conf, w_fused_1)
@@ -815,6 +927,8 @@ class DualDronePipeline:
             distance_estimates_d1.extend({"est": p[0], "method": "pinhole"} for p in pairs1_p)
         if pairs1_pitch:
             distance_estimates_d1.extend({"est": p[0], "method": "pitch"} for p in pairs1_pitch)
+        if pairs1_fused:
+            distance_estimates_d1.extend({"est": p[0], "method": "_fused"} for p in pairs1_fused)
 
         self.stats_drone1.add_image_results(
             1 if best_det1 else 0,
@@ -834,7 +948,8 @@ class DualDronePipeline:
             distance_estimates_d2.extend({"est": p[0], "method": "pinhole"} for p in pairs2_p)
         if pairs2_pitch:
             distance_estimates_d2.extend({"est": p[0], "method": "pitch"} for p in pairs2_pitch)
-
+        if pairs2_fused:
+            distance_estimates_d2.extend({"est": p[0], "method": "_fused"} for p in pairs2_fused)
         self.stats_drone2.add_image_results(
             1 if best_det2 else 0,
             weapons_detected_d2_best,
@@ -857,10 +972,18 @@ class DualDronePipeline:
             distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "bi", "d_source": "d1"} for p in fused_bi_pairs_d1)
         if fused_bi_pairs_d2:
             distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "bi", "d_source": "d2"} for p in fused_bi_pairs_d2)
+        if fused_weighted_avg_d1:
+            distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "weighted_avg", "d_source": "d1"} for p in fused_weighted_avg_d1)
+        if fused_weighted_avg_d2:
+            distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "weighted_avg", "d_source": "d2"} for p in fused_weighted_avg_d2)
+        # if fused_weighted_tri_d1:
+        #     distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "weighted_bi", "d_source": "d1"} for p in fused_weighted_tri_d1)
+        # if fused_weighted_tri_d2:
+        #     distance_estimates_fused.extend({"est": p[0], "method": "fused", "fusion_type": "weighted_bi", "d_source": "d2"} for p in fused_weighted_tri_d2)
 
         # ---- FUSED stats should be FRAME-LEVEL (one target max), not “two methods = two people” ----
         fused_present = any(
-            isinstance(d, dict) and d.get("source") in ("fused_average", "fused_bearing_intersection")
+            isinstance(d, dict) and d.get("source") in ("fused_average", "fused_bearing_intersection", "fused_weighted_average")#, "fused_weighted_bearing_intersection")
             for d in (fused_detections or [])
         )
 
@@ -889,11 +1012,13 @@ class DualDronePipeline:
             if best_det1:
                 out["d1_pitch"] = best_det1.get("distance_pitch_m")
                 out["d1_pinhole"] = best_det1.get("distance_pinhole_m")
+                out["d1_fused"] = best_det1.get("distance_fused_m")
 
             # --- Drone 2 ---
             if best_det2:
                 out["d2_pitch"] = best_det2.get("distance_pitch_m")
                 out["d2_pinhole"] = best_det2.get("distance_pinhole_m")
+                out["d2_fused"] = best_det2.get("distance_fused_m")
 
             # --- Fused ---
             for d in fused_detections:
@@ -904,6 +1029,14 @@ class DualDronePipeline:
                 elif d.get("source") == "fused_bearing_intersection":
                     out["fused_bi_d1"] = d.get("distance_drone1_bearing_intersection_m")
                     out["fused_bi_d2"] = d.get("distance_drone2_bearing_intersection_m")
+
+                elif d.get("source") == "fused_weighted_average":
+                    out["fused_weighted_avg_d1"] = d.get("distance_drone1_weighted_average_m")
+                    out["fused_weighted_avg_d2"] = d.get("distance_drone2_weighted_average_m")
+
+                # elif d.get("source") == "fused_weighted_bearing_intersection":
+                #     out["fused_weighted_bi_d1"] = d.get("distance_drone1_weighted_bearing_intersection_m")
+                #     out["fused_weighted_bi_d2"] = d.get("distance_drone2_weighted_bearing_intersection_m")
 
             return out
 

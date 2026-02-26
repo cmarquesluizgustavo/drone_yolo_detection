@@ -44,7 +44,8 @@ class DualDroneFusion:
             'drone_measurements': [{
                 'uav_pos': uav_pos,
                 'distance': det.distance_m,
-                'bearing': det.bearing_deg
+                'bearing': det.bearing_deg,
+                'person_confidence': det.person_confidence
             }],
             'person_confidence': det.person_confidence,
             'has_weapon': det.has_weapon,
@@ -74,8 +75,6 @@ class DualDroneFusion:
         
         measurement_groups = []
         used_det2 = set()
-        matches = []
-        unmatched1 = []
         
         # drone1 processing
         for idx1, det1 in enumerate(detections1):
@@ -117,12 +116,14 @@ class DualDroneFusion:
                 {
                     'uav_pos': uav1_pos,
                     'distance': det1.distance_m,
-                    'bearing': det1.bearing_deg
+                    'bearing': det1.bearing_deg,
+                    'person_confidence': det1.person_confidence,
                 },
                 {
                     'uav_pos': uav2_pos,
                     'distance': det2.distance_m,
-                    'bearing': det2.bearing_deg
+                    'bearing': det2.bearing_deg,
+                    'person_confidence': det2.person_confidence
                 }
             ],
             'person_confidence': fused_person_conf,

@@ -31,6 +31,8 @@ def plot_ground_plane(
     targets_2,
     targets_fused_avg,
     targets_fused_bi,
+    targets_fused_wavg,
+    #targets_fused_wbi,
     measurements_1,
     measurements_2,
     distance_info,
@@ -95,6 +97,9 @@ def plot_ground_plane(
     bi_xs, bi_ys = series_to_xy(targets_fused_bi)
     bi_targets_xy = list(zip(bi_xs, bi_ys))
 
+    wavg_xs, wavg_ys = series_to_xy(targets_fused_wavg)
+    #wbi_xs, wbi_ys = series_to_xy(targets_fused_wbi)
+
 
     fig, ax = plt.subplots(figsize=(3.35, 3.0), dpi=300)
 
@@ -129,6 +134,16 @@ def plot_ground_plane(
         ax.scatter(bi_xs, bi_ys, s=25, marker="X", c="k", zorder=5)
         all_x.extend(bi_xs)
         all_y.extend(bi_ys)
+
+    if wavg_xs:
+        ax.scatter(wavg_xs, wavg_ys, s=25, marker="*", c="m", zorder=5)
+        all_x.extend(wavg_xs)
+        all_y.extend(wavg_ys)
+
+    # if wbi_xs:
+    #     ax.scatter(wbi_xs, wbi_ys, s=25, marker="X", c="m", zorder=5)
+    #     all_x.extend(wbi_xs)
+    #     all_y.extend(wbi_ys)
 
     # Bearing rays / range circles
     def draw_measurements(measurements, color, intersection_targets):
@@ -204,16 +219,24 @@ def plot_ground_plane(
 
     # --- Annotate estimated distances  ---
     d1_pitch = distance_info.get("d1_pitch")
-    #d1_pinhole = distance_info.get("d1_pinhole")
+    d1_pinhole = distance_info.get("d1_pinhole")
+    d1_fused = distance_info.get("d1_fused")
 
     d2_pitch = distance_info.get("d2_pitch")
-    #d2_pinhole = distance_info.get("d2_pinhole")
+    d2_pinhole = distance_info.get("d2_pinhole")
+    d2_fused = distance_info.get("d2_fused")
 
     fused_avg_d1 = distance_info.get("fused_avg_d1")
     fused_bi_d1  = distance_info.get("fused_bi_d1")
 
     fused_avg_d2 = distance_info.get("fused_avg_d2")
     fused_bi_d2  = distance_info.get("fused_bi_d2")
+
+    fused_wavg_d1 = distance_info.get("fused_weighted_avg_d1")
+    fused_wbi_d1  = distance_info.get("fused_weighted_bearing_intersection_d1")
+
+    fused_wavg_d2 = distance_info.get("fused_weighted_avg_d2")
+    fused_wbi_d2  = distance_info.get("fused_weighted_bearing_intersection_d2")
 
     def fmt(v):
         return f"{v:.2f} m" if v is not None else "—"
@@ -226,7 +249,7 @@ def plot_ground_plane(
 
     fig.text(
         x_center, y_base + 3*row,
-        f"UAV1 est. distance: {fmt(d1_pitch)}",
+        f"UAV1 pitch dist.: {fmt(d1_pitch)} | UAV1 pinhole dist.: {fmt(d1_pinhole)} | UAV1 fused dist.: {fmt(d1_fused)}",
         fontsize=fs_text,
         ha="center",
         va="top",
@@ -235,7 +258,7 @@ def plot_ground_plane(
 
     fig.text(
         x_center, y_base + 2*row,
-        f"Fused avg: {fmt(fused_avg_d1)}  |  Fused int: {fmt(fused_bi_d1)}",
+        f"Fused avg: {fmt(fused_avg_d1)}  |  Fused int: {fmt(fused_bi_d1)} | Fused w-avg: {fmt(fused_wavg_d1)}",#  |  Fused w-int: {fmt(fused_wbi_d1)}",
         fontsize=fs_text,
         ha="center",
         va="top",
@@ -247,7 +270,7 @@ def plot_ground_plane(
 
     fig.text(
         x_center, y2 - row,
-        f"UAV2 est. distance: {fmt(d2_pitch)}",
+        f"UAV2 pitch dist.: {fmt(d2_pitch)} | UAV2 pinhole dist.: {fmt(d2_pinhole)} | UAV2 fused dist.: {fmt(d2_fused)}",
         fontsize=fs_text,
         ha="center",
         va="top",
@@ -256,7 +279,7 @@ def plot_ground_plane(
 
     fig.text(
         x_center, y2 - 2*row,
-        f"Fused avg: {fmt(fused_avg_d2)}  |  Fused int: {fmt(fused_bi_d2)}",
+        f"Fused avg: {fmt(fused_avg_d2)}  |  Fused int: {fmt(fused_bi_d2)} | Fused w-avg: {fmt(fused_wavg_d2)}",#  |  Fused w-int: {fmt(fused_wbi_d2)}",
         fontsize=fs_text,
         ha="center",
         va="top",
@@ -320,10 +343,20 @@ def build_series_from_frame(drone1_lat,drone1_lon,drone2_lat,drone2_lon,detectio
         {"label": "drone2", "lat": drone2_lat, "lon": drone2_lon},
     ]
 
-    targets_d1 = []
-    targets_d2 = []
+    targets_d1 = [] # now is fused
+    # targets_d1_pitch = []
+    # targets_d1_pinhole = []
+    # targets_d1_fused = []
+    
+    targets_d2 = [] # now is fused
+    # targets_d2_pitch = []
+    # targets_d2_pinhole = []
+    # targets_d2_fused = []
+
     targets_fused_average = []
     targets_fused_bearing_intersection = []
+    targets_fused_weighted_average = []
+    #targets_fused_weighted_bearing_intersection = []
     measurements_d1 = []
     measurements_d2 = []
 
@@ -374,6 +407,8 @@ def build_series_from_frame(drone1_lat,drone1_lon,drone2_lat,drone2_lon,detectio
     for det in fused_detections:
         geo_avg = det.get("fused_geoposition_average")
         geo_bi = det.get("fused_geoposition_bearing_intersection")
+        geo_wavg = det.get("fused_geoposition_weighted_average")
+        #geo_wbi = det.get("fused_geoposition_weighted_bearing_intersection")
         if geo_avg and isinstance(geo_avg, dict):
             lat = geo_avg.get("latitude")
             lon = geo_avg.get("longitude")
@@ -385,12 +420,25 @@ def build_series_from_frame(drone1_lat,drone1_lon,drone2_lat,drone2_lon,detectio
             if lat is not None and lon is not None:
                 targets_fused_bearing_intersection.append((lat, lon))
 
+        if geo_wavg and isinstance(geo_wavg, dict):
+            lat = geo_wavg.get("latitude")
+            lon = geo_wavg.get("longitude")
+            if lat is not None and lon is not None:
+                targets_fused_weighted_average.append((lat, lon))
+        # if geo_wbi and isinstance(geo_wbi, dict):
+        #     lat = geo_wbi.get("latitude")
+        #     lon = geo_wbi.get("longitude")
+        #     if lat is not None and lon is not None:
+        #         targets_fused_weighted_bearing_intersection.append((lat, lon))
+
     series_gps = {
         "drone_positions": drone_positions,
         "targets_d1": targets_d1,
         "targets_d2": targets_d2,
         "targets_fused_average": targets_fused_average,
         "targets_fused_bearing_intersection": targets_fused_bearing_intersection,
+        "targets_fused_weighted_average": targets_fused_weighted_average,
+        #"targets_fused_weighted_bearing_intersection": targets_fused_weighted_bearing_intersection,
         "measurements_d1": measurements_d1,
         "measurements_d2": measurements_d2,
     }

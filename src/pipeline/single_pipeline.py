@@ -312,6 +312,7 @@ class DetectionPipeline:
                 distance_pairs = []
                 distance_pairs_pinhole = []
                 distance_pairs_pitch = []
+                distance_pairs_fused = []
                 
                 # Use only the best detection for metrics
                 num_people_for_metrics = 1 if best_detection else 0
@@ -329,6 +330,8 @@ class DetectionPipeline:
                             distance_pairs_pinhole.append((best_detection['distance_pinhole_m'], real_distance))
                         if 'distance_pitch_m' in best_detection:
                             distance_pairs_pitch.append((best_detection['distance_pitch_m'], real_distance))
+                        if 'distance_fused_m' in best_detection:
+                            distance_pairs_fused.append((best_detection['distance_fused_m'], real_distance))
                     
                     # Get weapon detection results for the best detection only
                     if weapon_results and len(weapon_results) > 0:
@@ -349,6 +352,7 @@ class DetectionPipeline:
                     camera_pitch_real_deg=camera_pitch_real_deg,
                     distance_pairs_pinhole=distance_pairs_pinhole,
                     distance_pairs_pitch=distance_pairs_pitch,
+                    distance_pairs_fused=distance_pairs_fused
                 )
                 
                 # Print detection summary
@@ -383,7 +387,7 @@ class DetectionPipeline:
                     print(f"Weapon rate: {stats['weapons_in_people_pct']:.1f}% of people have weapons")
             if stats['total_distances'] > 0:
                 print(f"Distance measurements: {stats['total_distances']}")
-    
+
     def process_all_sample_directories(self, samples_dir: str, output_base_dir: str, filter_clips=False):
         # Get all subdirectories in samples
         all_sample_dirs = [d for d in os.listdir(samples_dir) 

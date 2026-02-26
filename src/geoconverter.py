@@ -2,6 +2,8 @@ import math
 from pyproj import proj
 
 class GeoConverter():
+
+    _proj = proj.Proj(proj='utm', zone=23, ellps='WGS84', preserve_units=False)
     
     @staticmethod
     def polar_to_xy(ref_x, ref_y, theta, r):
@@ -32,7 +34,7 @@ class GeoConverter():
         else:
             dx = x - ref_x
             dy = y - ref_y
-        r = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2))
+        r = math.hypot(dx,dy)
         theta = math.degrees(math.atan2(dx, dy)) 
         theta = (theta + 360) % 360 
         return theta, r
@@ -41,15 +43,12 @@ class GeoConverter():
     def geo_to_xy(lat, lon):
         if lat is None or lon is None:
             return None, None
-        p = proj.Proj(proj='utm', zone=23, ellps='WGS84', preserve_units=False)
-        x, y = p(lon, lat)
+        x, y = GeoConverter._proj(lon, lat)
         return x, y
 
     @staticmethod
     def xy_to_geo(x, y):
         if x is None or y is None:
             return None, None
-        p = proj.Proj(proj='utm', zone=23, ellps='WGS84',
-                      preserve_units=False)  # assuming you're using WGS84 geographic
-        lon, lat = p(x, y, inverse=True)
+        lon, lat = GeoConverter._proj(x, y, inverse=True)
         return lat, lon
