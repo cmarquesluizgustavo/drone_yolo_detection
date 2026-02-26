@@ -5,7 +5,7 @@ from ultralytics import YOLO
 from camera import Camera
 
 from geoconverter import GeoConverter
-from position_estimation import estimate_distance, estimate_distance_pitch, estimate_bearing, estimate_distance_fused
+from position_estimation import estimate_distance, estimate_distance_pitch, estimate_bearing
 
 # Detection and visualization constants
 PERSON_CLASS_ID = 0  # COCO class ID for 'person'
@@ -149,7 +149,7 @@ class PeopleDetector:
                                 # height based x pitch based
                                 distance_pinhole_m = estimate_distance(self.camera, person_height_px)
                                 distance_pitch_m = estimate_distance_pitch(self.camera, y2)
-                                distance_fused_m = estimate_distance_fused(self.camera, person_height_px, y2)
+                                # distance_new_m, bearing_new = estimate_distance_bearing_ground_intersection(self.camera, x_center, y2)
 
                                 x_center = float((x1 + x2) / 2)
                                 bearing_deg = float(estimate_bearing(self.camera, x_center))
@@ -164,10 +164,11 @@ class PeopleDetector:
                                 log_message = (f"Image: {image_name}, Person: {person_idx + 1}, "
                                              f"PixelHeight: {person_height_px:.1f}px, "
                                              f"HeightBased: {pinhole_str}m, PitchBased: {pitch_str}m, "
-                                             f"Fused: {distance_fused_m:.2f}m, "
+                                            #  f"Fused: {distance_new_m:.2f}m, "
                                              f"Real: {real_dist_str}m, "
                                              f"CamHeight: {cam_height_str}m, "
                                              f"CamPitch: {cam_pitch_str}deg, "
+                                            #  f"EstimatedBearing: {bearing_new:.2f}deg, "
                                              f"Confidence: {confidence:.3f}, "
                                              f"BBox: [{int(x1)}, {int(y1)}, {int(x2)}, {int(y2)}]")
                                 
@@ -214,8 +215,8 @@ class PeopleDetector:
                             detection_info['distance_pinhole_m'] = float(distance_pinhole_m)
                         if distance_pitch_m is not None:
                             detection_info['distance_pitch_m'] = float(distance_pitch_m)
-                        if distance_fused_m is not None:
-                            detection_info['distance_fused_m'] = float(distance_fused_m)
+                        # if distance_new_m is not None:
+                        #     detection_info['distance_new_m'] = float(distance_new_m)
 
                         # Add bearing if available
                         if bearing_deg is not None:
@@ -267,18 +268,18 @@ class PeopleDetector:
                         if self.camera.height_m is not None and self.camera.pitch_deg is not None:
                             distance_pitch_m = estimate_distance_pitch(self.camera, y_bottom)
 
-                        distance_fused_m = estimate_distance_fused(self.camera, person_height_px, y_bottom)
+                        # distance_new_m, bearing_new_deg = estimate_distance_bearing_ground_intersection(self.camera, x_center, y_bottom)
 
                         # Choose primary distance for downstream use
-                        if distance_fused_m is not None:
-                            distance_m = distance_fused_m
-                            distance_method = 'fused'
-                        elif distance_pitch_m is not None:
+                        if distance_pitch_m is not None:
                             distance_m = distance_pitch_m
                             distance_method = 'pitch'
                         elif distance_pinhole_m is not None:
                             distance_m = distance_pinhole_m
                             distance_method = 'pinhole'
+                        # elif distance_new_m is not None:
+                        #     distance_m = distance_new_m
+                        #     distance_method = 'new'
                         else:
                             distance_m = None
                             distance_method = 'none'
@@ -307,7 +308,7 @@ class PeopleDetector:
                             'distance_m': distance_m,
                             'distance_method': distance_method,
                             'distance_pinhole_m': distance_pinhole_m,
-                            'distance_fused_m': distance_fused_m,
+                            # 'distance_new_m': distance_new_m,
                             'distance_pitch_m': distance_pitch_m,
                             'bearing_deg': bearing_deg,
                             'cam_height_m': self.camera.height_m,

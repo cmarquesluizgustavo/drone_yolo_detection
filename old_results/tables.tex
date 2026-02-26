@@ -1,0 +1,127 @@
+\\begin{table}[h]
+\\centering
+\\caption{Single-UAV distance estimation RMSE (meters) for ground-plane and height-based approaches.}
+\\label{tab:single_uav_results}
+\\begin{tabular}{c c c cc cc}
+\\toprule
+\\multirow{2}{*}{\\textbf{Angle}} &
+\\multirow{2}{*}{\\textbf{Distance}} &
+\\multirow{2}{*}{\\textbf{Height}} &
+\\multicolumn{2}{c}{\\textbf{Ground-based}} &
+\\multicolumn{2}{c}{\\textbf{Height-based}} \\\\
+\\cmidrule(lr){4-5} \\cmidrule(lr){6-7}
+ & & & \\textbf{UAV 1} & \\textbf{UAV 2} & \\textbf{UAV 1} & \\textbf{UAV 2} \\\\
+\\midrule
+45\N{\circ} & 5\,m & 2\,m & 0.783 & \textbf{0.554} & 1.011 & \textbf{0.733} \\
+45\N{\circ} & 5\,m & 5\,m & 0.813 & \textbf{0.554} & \textbf{1.071} & 1.173 \\
+45\N{\circ} & 10\,m & 2\,m & 1.513 & \textbf{1.082} & 1.973 & \textbf{1.821} \\
+45\N{\circ} & 10\,m & 5\,m & \textbf{0.408} & 2.149 & \textbf{0.700} & 0.916 \\
+90\N{\circ} & 5\,m & 2\,m & \textbf{0.517} & 1.347 & \textbf{0.952} & 1.411 \\
+90\N{\circ} & 5\,m & 5\,m & 1.145 & \textbf{0.550} & \textbf{0.221} & 0.480 \\
+90\N{\circ} & 10\,m & 2\,m & \textbf{1.272} & 1.854 & 1.959 & \textbf{1.890} \\
+90\N{\circ} & 10\,m & 5\,m & \textbf{0.550} & 2.523 & 1.331 & \textbf{1.155} \\
+\\bottomrule
+\\end{tabular}
+\\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Single-UAV distance estimation RMSE (meters) averaged over two UAVs for ground-plane and height-based approaches.}
+\label{tab:single_uav_results}
+\begin{tabular}{c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Ground-based (Mean)} & \textbf{Height-based (Mean)} \\
+\midrule
+45\N{\circ} & 5\,m & 2\,m & 0.669 & 0.872 \\
+45\N{\circ} & 5\,m & 5\,m & 0.684 & 1.122 \\
+45\N{\circ} & 10\,m & 2\,m & 1.298 & 1.897 \\
+45\N{\circ} & 10\,m & 5\,m & 1.279 & 0.808 \\
+90\N{\circ} & 5\,m & 2\,m & 0.932 & 1.182 \\
+90\N{\circ} & 5\,m & 5\,m & 0.848 & 0.351 \\
+90\N{\circ} & 10\,m & 2\,m & 1.563 & 1.925 \\
+90\N{\circ} & 10\,m & 5\,m & 1.537 & 1.243 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\\begin{table}[h]
+\\centering
+\\caption{Dual-UAV fused localization RMSE (meters) using ray-intersection triangulation and coordinate averaging.}
+\\label{tab:fused_results}
+\\begin{tabular}{c c c c c c}
+\\toprule
+\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Intersection} & \\textbf{Average} & \\textbf{Weighted Avg} \\\\
+\\midrule
+45\N{\circ} & 5\,m & 2\,m & 0.709 & 0.479 & \textbf{0.468} \\
+45\N{\circ} & 5\,m & 5\,m & 0.916 & 0.674 & \textbf{0.669} \\
+45\N{\circ} & 10\,m & 2\,m & 5.387 & \textbf{0.611} & 0.651 \\
+45\N{\circ} & 10\,m & 5\,m & 1.253 & 1.063 & \textbf{0.957} \\
+90\N{\circ} & 5\,m & 2\,m & \textbf{0.361} & 0.477 & 0.484 \\
+90\N{\circ} & 5\,m & 5\,m & 1.027 & \textbf{0.414} & 0.420 \\
+90\N{\circ} & 10\,m & 2\,m & 1.428 & \textbf{0.806} & 0.890 \\
+90\N{\circ} & 10\,m & 5\,m & 1.265 & \textbf{1.196} & 1.242 \\
+\\bottomrule
+\\end{tabular}
+\\end{table}
+
+
+
+\\begin{table}[h]
+\\centering
+\\caption{Overall localization RMSE comparison across estimation and fusion strategies (meters).}
+\\label{tab:rmse_final_comparison_by_angle}
+\\begin{tabular}{c c c c c}
+\\toprule
+\\textbf{Angle} & \\textbf{Height-based} & \\textbf{Ground-based} & \\textbf{Intersection} & \\textbf{Average} \\\\
+\\midrule
+45\N{\circ} & 1.256 & 0.963 & 2.883 & \textbf{0.719} \\
+90\N{\circ} & 1.284 & 1.137 & 1.087 & \textbf{0.757} \\
+\\bottomrule
+\\end{tabular}
+\\end{table}
+
+
+
+\\begin{table}[h]
+\\centering
+\\caption{Per-configuration winner frequency from the log (best estimator).}
+\\label{tab:best_estimator_votes}
+\\begin{tabular}{c c c l}
+\\toprule
+\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Top winners (votes)} \\\\
+\\midrule
+45\N{\circ} & 5\,m & 2\,m & pitch (152.00), pinhole (8.00) \\
+45\N{\circ} & 5\,m & 5\,m & pitch (160.00) \\
+45\N{\circ} & 10\,m & 2\,m & pitch (157.00), pinhole (3.00) \\
+45\N{\circ} & 10\,m & 5\,m & pinhole (80.00), pitch (50.00) \\
+90\N{\circ} & 5\,m & 2\,m & pitch (122.00), pinhole (38.00) \\
+90\N{\circ} & 5\,m & 5\,m & pinhole (140.00), pitch (20.00) \\
+90\N{\circ} & 10\,m & 2\,m & pitch (141.00), pinhole (19.00) \\
+90\N{\circ} & 10\,m & 5\,m & pinhole (71.00), pitch (59.00) \\
+\\bottomrule
+\\end{tabular}
+\\end{table}
+
+
+
+\\begin{table}[h]
+\\centering
+\\caption{Per-configuration winner frequency from the log (best fusion).}
+\\label{tab:best_fusion_votes}
+\\begin{tabular}{c c c l}
+\\toprule
+\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Top winners (votes)} \\\\
+\\midrule
+45\N{\circ} & 5\,m & 2\,m & average (87.00), bearing_intersection (55.00), weighted_average (18.00) \\
+45\N{\circ} & 5\,m & 5\,m & average (84.00), weighted_average (70.00), bearing_intersection (6.00) \\
+45\N{\circ} & 10\,m & 2\,m & average (84.00), weighted_average (76.00) \\
+45\N{\circ} & 10\,m & 5\,m & bearing_intersection (73.00), weighted_average (34.00), average (22.00) \\
+90\N{\circ} & 5\,m & 2\,m & bearing_intersection (75.00), average (68.00), weighted_average (17.00) \\
+90\N{\circ} & 5\,m & 5\,m & weighted_average (79.00), average (61.00), bearing_intersection (19.00) \\
+90\N{\circ} & 10\,m & 2\,m & average (75.00), weighted_average (58.00), bearing_intersection (26.00) \\
+90\N{\circ} & 10\,m & 5\,m & average (65.00), weighted_average (57.00), NA (5.00) \\
+\\bottomrule
+\\end{tabular}
+\\end{table}

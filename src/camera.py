@@ -11,51 +11,69 @@ Specs:
 - Pixels: 48MP (Still), Multiple video resolutions available
 - Perspective (HFOV): 79°
 - Lens EFL: 25.6 mm
-- Aperture: f/2.8–f/11
+- Aperture: f/1.8
 - Video Resolution: 8K/6K/4K/2.7K/1080P at various framerates
 """
 
 class Camera:
-    def __init__(self, sensor_width_mm=6.4, sensor_height_mm=4.8,
-                 focal_35mm_mm=25.6, image_width_px=1920, image_height_px=1080):
+    def __init__(self, sensor_width_mm=6.4, sensor_height_mm=4.8, focal_35mm_mm=25.6, 
+                 image_width_px=1920, image_height_px=1080 , fov_deg=79.0):
         
         self.image_width_px = image_width_px
         self.image_height_px = image_height_px
 
-        self.focal_35mm_mm = focal_35mm_mm
-
-        self.sensor_width_mm = sensor_width_mm
-        self.sensor_height_mm = sensor_height_mm
+        self.cx_px = (self.image_width_px - 1) / 2.0
+        self.cy_px = (self.image_height_px - 1) / 2.0
         
         self.height_m = 0.0      # filename
         self.pitch_deg = 0.0     # telemetry/manual
         self.yaw_deg = 0.0       # telemetry/manual
         self.roll_deg = 0.0      # telemetry/manual
-
-        # telemetry/manual
         self.lat = 0.0
         self.lon = 0.0
-
-        # Calculate pixel sizes first
-        self.pixel_size_x_mm = sensor_width_mm / image_width_px
-        self.pixel_size_y_mm = sensor_height_mm / image_height_px
         
-        # Calculate actual focal length from 35mm equivalent
-        self.diag_sensor_mm = math.sqrt(sensor_width_mm**2 + sensor_height_mm**2)
-        self.diag_35mm_mm = 43.27  # diagonal of 35mm sensor
-        self.crop_factor = self.diag_35mm_mm / self.diag_sensor_mm
-        self.focal_length_mm = self.focal_35mm_mm / self.crop_factor
-        
-        self.focal_length_px = self.focal_length_mm / self.pixel_size_y_mm
+        self.hfov_deg = fov_deg
 
-        # Compute FOV from real optics
-        self.horizontal_fov_deg = math.degrees(
-            2 * math.atan(sensor_width_mm / (2 * self.focal_length_mm))
+        hfov_rad = math.radians(fov_deg)
+        self.fx_px = (self.image_width_px / 2.0) / math.tan(hfov_rad / 2.0)
+        
+        vfov_rad = 2.0 * math.atan(
+            math.tan(hfov_rad / 2.0) * (self.image_height_px / self.image_width_px)
         )
-        self.vertical_fov_deg = math.degrees(
-            2 * math.atan(sensor_height_mm / (2 * self.focal_length_mm))
-        )
-        # Note: Manufacturer spec lists perspective as 79° (horizontal FOV)
+        self.fy_px = (self.image_height_px / 2.0) / math.tan(vfov_rad / 2.0)
+
+        self.vfov_deg = math.degrees(vfov_rad)
+
+        # # ANOTHER WAY
+
+        # self.focal_35mm_mm = focal_35mm_mm
+        # self.sensor_width_mm = sensor_width_mm
+        # self.sensor_height_mm = sensor_height_mm
+
+        # #Calculate pixel sizes first
+        # self.pixel_size_x_mm = sensor_width_mm / image_width_px
+        # self.pixel_size_y_mm = sensor_height_mm / image_height_px
+        
+        # # Calculate actual focal length from 35mm equivalent
+        # self.diag_sensor_mm = math.sqrt(sensor_width_mm**2 + sensor_height_mm**2)
+        # self.diag_35mm_mm = 43.27  # diagonal of 35mm sensor
+        # self.crop_factor = self.diag_35mm_mm / self.diag_sensor_mm
+        # self.focal_length_mm = self.focal_35mm_mm / self.crop_factor
+        
+        # self.focal_length_px = self.focal_length_mm / self.pixel_size_y_mm
+
+        # #Focal length in pixels (separate axes!)
+        # self.fx_px = self.focal_length_mm / self.pixel_size_x_mm
+        # self.fy_px = self.focal_length_mm / self.pixel_size_y_mm
+
+        # #Compute FOV from real optics
+        # self.hfov_deg = math.degrees(
+        #     2 * math.atan(sensor_width_mm / (2 * self.focal_length_mm))
+        # )
+        # self.vfov_deg = math.degrees(
+        #     2 * math.atan(sensor_height_mm / (2 * self.focal_length_mm))
+        # )
+        
     
     def load_telemetry_from_video_path(self, video_or_image_path):
         file_path = video_or_image_path

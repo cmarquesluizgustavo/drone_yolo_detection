@@ -85,10 +85,10 @@ class DualDronePipeline:
 
         d1_h = det1.get("distance_pinhole_m") if det1 else None
         d1_t = det1.get("distance_pitch_m") if det1 else None
-        d1_f = det1.get("distance_fused_m") if det1 else None
+        #d1_n = det1.get("distance_new_m") if det1 else None
         d2_h = det2.get("distance_pinhole_m") if det2 else None
         d2_t = det2.get("distance_pitch_m") if det2 else None
-        d2_f = det2.get("distance_fused_m") if det2 else None
+        #d2_n = det2.get("distance_new_m") if det2 else None
 
         geo1 = det1.get("person_geoposition") if det1 else None
         geo2 = det2.get("person_geoposition") if det2 else None
@@ -113,7 +113,25 @@ class DualDronePipeline:
 
 
         def fmt(val):
-            return f"{val:.2f}" if val is not None else "None"
+            """Format numeric values safely. If val is a tuple/list, format its numeric
+            elements joined by '/'. Fallback to str() for unexpected types.
+            """
+            if val is None:
+                return "None"
+            # If it's a tuple/list, try to format numeric elements
+            if isinstance(val, (tuple, list)):
+                try:
+                    parts = []
+                    for v in val:
+                        parts.append(f"{float(v):.2f}")
+                    return "(" + ",".join(parts) + ")"
+                except Exception:
+                    return str(val)
+            # Single numeric value
+            try:
+                return f"{float(val):.2f}"
+            except Exception:
+                return str(val)
 
         def fmt_geo(geo):
             if geo and isinstance(geo, dict):
@@ -124,10 +142,10 @@ class DualDronePipeline:
             "DISTANCE: "
             f"dist1_height-based={fmt(d1_h)}, "
             f"dist1_pitch-based={fmt(d1_t)}, "
-            f"dist1_fused={fmt(d1_f)}, "
+            #f"dist1_new={fmt(d1_n)}, "
             f"dist2_height-based={fmt(d2_h)}, "
             f"dist2_pitch-based={fmt(d2_t)}, "
-            f"dist2_fused={fmt(d2_f)}, "
+            #f"dist2_new={fmt(d2_n)}, "
             f"geoposition_drone1={fmt_geo(geo1)}, " # this geopositions use only the pitch-based.
             f"geoposition_drone2={fmt_geo(geo2)}"
         )
@@ -857,8 +875,8 @@ class DualDronePipeline:
         pairs2_pitch = []
         pairs1_primary = []
         pairs2_primary = []
-        pairs1_fused = []
-        pairs2_fused = []
+        #pairs1_new = []
+        #pairs2_new = []
 
         if real_distance is not None:
             if best_det1:
@@ -868,8 +886,8 @@ class DualDronePipeline:
                     pairs1_p.append((best_det1["distance_pinhole_m"], real_distance))
                 if best_det1.get("distance_pitch_m") is not None:
                     pairs1_pitch.append((best_det1["distance_pitch_m"], real_distance))
-                if best_det1.get("distance_fused_m") is not None:
-                    pairs1_fused.append((best_det1["distance_fused_m"], real_distance))
+                # if best_det1.get("distance_new_m") is not None:
+                #     pairs1_new.append((best_det1["distance_new_m"], real_distance))
             if best_det2:
                 if best_det2.get("distance_m") is not None:
                     pairs2_primary.append((best_det2["distance_m"], real_distance))
@@ -877,8 +895,8 @@ class DualDronePipeline:
                     pairs2_p.append((best_det2["distance_pinhole_m"], real_distance))
                 if best_det2.get("distance_pitch_m") is not None:
                     pairs2_pitch.append((best_det2["distance_pitch_m"], real_distance))
-                if best_det2.get("distance_fused_m") is not None:
-                    pairs2_fused.append((best_det2["distance_fused_m"], real_distance))
+                # if best_det2.get("distance_new_m") is not None:
+                #     pairs2_new.append((best_det2["distance_new_m"], real_distance))
 
         # Weapon detection for best detection only
         weapons_detected_d1_best = 0
@@ -912,12 +930,6 @@ class DualDronePipeline:
         # Permitir comparação de diferentes métodos de fuse_confidence
         if getattr(self, "verbose", False):
             w_fused_1 = self.fusion.fuse_confidence(w1_conf, w2_conf)
-            w_fused_2 = self.fusion.fuse_confidence_2(w1_conf, w2_conf)
-            w_fused_3 = self.fusion.fuse_confidence_3(w1_conf, w2_conf)
-            print("Comparação métodos de WEAPON fusion:")
-            print(f"  Método 1 (1-(1-wc1)*(1-wc2)): {w_fused_1:.3f}")
-            print(f"  Método 2 (média):           {w_fused_2:.3f}")
-            print(f"  Método 3 (máximo):          {w_fused_3:.3f}")
             self.per_frame_output(best_det1, best_det2, fused_detections, w1_conf, w2_conf, w_fused_1)
 
         # Individual drone stats (using only best detection)
@@ -927,8 +939,8 @@ class DualDronePipeline:
             distance_estimates_d1.extend({"est": p[0], "method": "pinhole"} for p in pairs1_p)
         if pairs1_pitch:
             distance_estimates_d1.extend({"est": p[0], "method": "pitch"} for p in pairs1_pitch)
-        if pairs1_fused:
-            distance_estimates_d1.extend({"est": p[0], "method": "_fused"} for p in pairs1_fused)
+        # if pairs1_new:
+        #     distance_estimates_d1.extend({"est": p[0], "method": "new"} for p in pairs1_new)
 
         self.stats_drone1.add_image_results(
             1 if best_det1 else 0,
@@ -948,8 +960,9 @@ class DualDronePipeline:
             distance_estimates_d2.extend({"est": p[0], "method": "pinhole"} for p in pairs2_p)
         if pairs2_pitch:
             distance_estimates_d2.extend({"est": p[0], "method": "pitch"} for p in pairs2_pitch)
-        if pairs2_fused:
-            distance_estimates_d2.extend({"est": p[0], "method": "_fused"} for p in pairs2_fused)
+        # if pairs2_new:
+        #     distance_estimates_d2.extend({"est": p[0], "method": "new"} for p in pairs2_new)
+
         self.stats_drone2.add_image_results(
             1 if best_det2 else 0,
             weapons_detected_d2_best,
@@ -1012,13 +1025,13 @@ class DualDronePipeline:
             if best_det1:
                 out["d1_pitch"] = best_det1.get("distance_pitch_m")
                 out["d1_pinhole"] = best_det1.get("distance_pinhole_m")
-                out["d1_fused"] = best_det1.get("distance_fused_m")
+                # out["d1_new"] = best_det1.get("distance_new_m")
 
             # --- Drone 2 ---
             if best_det2:
                 out["d2_pitch"] = best_det2.get("distance_pitch_m")
                 out["d2_pinhole"] = best_det2.get("distance_pinhole_m")
-                out["d2_fused"] = best_det2.get("distance_fused_m")
+                # out["d2_new"] = best_det2.get("distance_new_m")
 
             # --- Fused ---
             for d in fused_detections:
@@ -1039,9 +1052,65 @@ class DualDronePipeline:
                 #     out["fused_weighted_bi_d2"] = d.get("distance_drone2_weighted_bearing_intersection_m")
 
             return out
-
-
+        
         distances = collect_distances(best_det1, best_det2, fused_detections)
+
+        # -------------------------------
+        # Frame winner analysis
+        # -------------------------------
+        if real_distance is not None:
+
+            pinhole_vals = [v for k, v in distances.items() if "pinhole" in k and v is not None]
+            pitch_vals   = [v for k, v in distances.items() if "pitch" in k and v is not None]
+            # new_vals     = [v for k, v in distances.items() if "new" in k and v is not None]
+
+            err_pinhole = sum(abs(v - real_distance) for v in pinhole_vals) / len(pinhole_vals) if pinhole_vals else None
+            err_pitch   = sum(abs(v - real_distance) for v in pitch_vals) / len(pitch_vals) if pitch_vals else None
+            # err_new     = sum(abs(v - real_distance) for v in new_vals) / len(new_vals) if new_vals else None
+
+            errors = {
+                "pinhole": err_pinhole,
+                "pitch": err_pitch,
+                # "new": err_new
+            }
+
+            errors = {k: v for k, v in errors.items() if v is not None}
+
+            estimator_winner = min(errors, key=errors.get) if errors else None
+
+            # --- fusion comparison: average vs bearing intersection vs weighted average ---
+            avg_vals = [v for k, v in distances.items() if "fused_avg" in k and v is not None]
+            bi_vals  = [v for k, v in distances.items() if "fused_bi" in k and v is not None]
+            weighted_avg_vals = [v for k, v in distances.items() if "fused_weighted_avg" in k and v is not None]
+
+            err_avg = sum(abs(v - real_distance) for v in avg_vals) / len(avg_vals) if avg_vals else None
+            err_bi  = sum(abs(v - real_distance) for v in bi_vals) / len(bi_vals) if bi_vals else None
+            err_weighted_avg = (
+                sum(abs(v - real_distance) for v in weighted_avg_vals) / len(weighted_avg_vals)
+                if weighted_avg_vals else None
+            )
+
+            # Pick best fusion among the ones that exist
+            fusion_errors = {
+                "average": err_avg,
+                "bearing_intersection": err_bi,
+                "weighted_average": err_weighted_avg,
+            }
+            fusion_errors = {k: v for k, v in fusion_errors.items() if v is not None}
+            fusion_winner = min(fusion_errors, key=fusion_errors.get) if fusion_errors else None
+
+            def fmt(x):
+                return f"{x:.2f}" if x is not None else "NA"
+
+            # Include errors for each drone in the estimator_winner output
+            print(
+                f"Frame {frame_idx} | "
+                f"best estimator: {estimator_winner or 'NA'} "
+                f"(pinhole_d1={fmt(distances.get('d1_pinhole'))}, pinhole_d2={fmt(distances.get('d2_pinhole'))}, "
+                f"pitch_d1={fmt(distances.get('d1_pitch'))}, pitch_d2={fmt(distances.get('d2_pitch'))}) | "
+                f"best fusion: {fusion_winner or 'NA'} "
+                f"(avg={fmt(err_avg)} bi={fmt(err_bi)} weighted_avg={fmt(err_weighted_avg)})"
+            )
 
         return {
             "drone1_lat": self.camera_drone1.lat,
