@@ -426,7 +426,7 @@ def aggregate_overall_by_angle(samples: List[SampleData]) -> Dict[int, Dict[str,
 # LaTeX
 # --------------------------
 
-def latex_table_single_uav(agg: Dict[ConfigKey, ConfigAgg]) -> str:
+def latex_table_single_uav_per_uav(agg: Dict[ConfigKey, ConfigAgg]) -> str:
     lines = []
     lines.append(r"\\begin{table}[h]")
     lines.append(r"\\centering")
@@ -473,6 +473,137 @@ def latex_table_single_uav(agg: Dict[ConfigKey, ConfigAgg]) -> str:
     lines.append(r"\\end{table}")
     return "\n".join(lines)
 
+def latex_table_single_uav_pooled(agg: Dict[ConfigKey, ConfigAgg]) -> str:
+    """
+    Table for single UAV estimation showing pooled RMSEs for ground-based and height-based methods.
+    All estimates from UAV1 and UAV2 are pooled together for each config.
+    """
+    lines = []
+    lines.append(r"\\begin{table}[h]")
+    lines.append(r"\\centering")
+    lines.append(r"\\caption{Single-UAV pooled RMSE (meters) for ground-based and height-based approaches.}")
+    lines.append(r"\\label{tab:single_uav_pooled_results}")
+    lines.append(r"\\begin{tabular}{c c c c c}")
+    lines.append(r"\\toprule")
+    lines.append(r"\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Ground-based} & \\textbf{Height-based} \\\\")
+    lines.append(r"\\midrule")
+
+    for key in sorted(agg.keys(), key=lambda k: (k.angle, k.dist_gt, k.height_gt)):
+        a = agg[key]
+        gt = float(key.dist_gt)
+        pooled_g = a.g1 + a.g2
+        pooled_h = a.h1 + a.h2
+        rmse_g = rmse(pooled_g, gt)
+        rmse_h = rmse(pooled_h, gt)
+
+        # Bold the minimum between ground-based and height-based pooled RMSE
+        m = min(rmse_g if rmse_g is not None else float('inf'),
+                rmse_h if rmse_h is not None else float('inf'))
+        bold_g = rmse_g == m if rmse_g is not None else False
+        bold_h = rmse_h == m if rmse_h is not None else False
+
+        lines.append(
+            f"{key.angle}\\N{{\\circ}} & {key.dist_gt}\\,m & {key.height_gt}\\,m & "
+            f"{fmt_rmse(rmse_g, bold_g)} & {fmt_rmse(rmse_h, bold_h)} \\\\"
+        )
+
+    lines.append(r"\\bottomrule")
+    lines.append(r"\\end{tabular}")
+    lines.append(r"\\end{table}")
+    return "\n".join(lines)
+
+def latex_table_dual_fused_pooled(agg: Dict[ConfigKey, ConfigAgg], include_weighted: bool = True) -> str:
+    """
+    Table for dual-UAV fused localization showing pooled RMSEs for intersection, average, and weighted average methods.
+    All fused estimates from UAV1 and UAV2 are pooled together for each config.
+    """
+    cols = r"c c c c c" if not include_weighted else r"c c c c c c"
+    lines = []
+    lines.append(r"\\begin{table}[h]")
+    lines.append(r"\\centering")
+    lines.append(r"\\caption{Dual-UAV pooled RMSE (meters) for fused localization (intersection, average, weighted average).}")
+    lines.append(r"\\label{tab:fused_pooled_results}")
+    lines.append(rf"\\begin{{tabular}}{{{cols}}}")
+    lines.append(r"\\toprule")
+    if include_weighted:
+        lines.append(r"\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Intersection} & \\textbf{Average} & \\textbf{Weighted Avg} \\\\")
+    else:
+        lines.append(r"\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Intersection} & \\textbf{Average} \\\\")
+    lines.append(r"\\midrule")
+
+    for key in sorted(agg.keys(), key=lambda k: (k.angle, k.dist_gt, k.height_gt)):
+        a = agg[key]
+        gt = float(key.dist_gt)
+        pooled_bi = a.bi_1 + a.bi_2
+        pooled_avg = a.avg_1 + a.avg_2
+        pooled_wavg = a.wavg_1 + a.wavg_2 if include_weighted else None
+        rmse_bi = rmse(pooled_bi, gt)
+        rmse_avg = rmse(pooled_avg, gt)
+        rmse_wavg = rmse(pooled_wavg, gt) if include_weighted else None
+
+        # Bold the minimum among the pooled RMSEs
+        vals = [v for v in [rmse_bi, rmse_avg, rmse_wavg] if v is not None]
+        m = min(vals) if vals else float('inf')
+        bold_bi = rmse_bi == m
+        bold_avg = rmse_avg == m
+        bold_wavg = rmse_wavg == m if include_weighted else False
+
+        if include_weighted:
+            lines.append(
+                f"{key.angle}\\N{{\\circ}} & {key.dist_gt}\\,m & {key.height_gt}\\,m & "
+                f"{fmt_rmse(rmse_bi, bold_bi)} & {fmt_rmse(rmse_avg, bold_avg)} & {fmt_rmse(rmse_wavg, bold_wavg)} \\\\"
+            )
+        else:
+            lines.append(
+                f"{key.angle}\\N{{\\circ}} & {key.dist_gt}\\,m & {key.height_gt}\\,m & "
+                f"{fmt_rmse(rmse_bi, bold_bi)} & {fmt_rmse(rmse_avg, bold_avg)} \\\\"
+            )
+
+    lines.append(r"\\bottomrule")
+    lines.append(r"\\end{tabular}")
+    lines.append(r"\\end{table}")
+    return "\n".join(lines)
+
+def latex_table_single_uav(agg: Dict[ConfigKey, ConfigAgg]) -> str:
+    """
+    Table for single UAV estimation showing combined (mean of UAV1 and UAV2) RMSEs for ground-based and height-based methods.
+    Columns: Angle, Distance, Height, Ground-based Combined, Height-based Combined
+    """
+    lines = []
+    lines.append(r"\\begin{table}[h]")
+    lines.append(r"\\centering")
+    lines.append(r"\\caption{Single-UAV combined RMSE (meters) for ground-based and height-based approaches.}")
+    lines.append(r"\\label{tab:single_uav_combined_results}")
+    lines.append(r"\\begin{tabular}{c c c c c}")
+    lines.append(r"\\toprule")
+    lines.append(r"\\textbf{Angle} & \\textbf{Distance} & \\textbf{Height} & \\textbf{Ground-based} & \\textbf{Height-based} \\\\")
+    lines.append(r"\\midrule")
+
+    for key in sorted(agg.keys(), key=lambda k: (k.angle, k.dist_gt, k.height_gt)):
+        a = agg[key]
+        gt = float(key.dist_gt)
+        g1 = rmse(a.g1, gt)
+        g2 = rmse(a.g2, gt)
+        h1 = rmse(a.h1, gt)
+        h2 = rmse(a.h2, gt)
+        g_combined = mean2(g1, g2)
+        h_combined = mean2(h1, h2)
+
+        # Bold the minimum between ground-based and height-based combined
+        m = min(g_combined if g_combined is not None else float('inf'),
+                h_combined if h_combined is not None else float('inf'))
+        bold_g_combined = g_combined == m if g_combined is not None else False
+        bold_h_combined = h_combined == m if h_combined is not None else False
+
+        lines.append(
+            f"{key.angle}\\N{{\\circ}} & {key.dist_gt}\\,m & {key.height_gt}\\,m & "
+            f"{fmt_rmse(g_combined, bold_g_combined)} & {fmt_rmse(h_combined, bold_h_combined)} \\\\"
+        )
+
+    lines.append(r"\\bottomrule")
+    lines.append(r"\\end{tabular}")
+    lines.append(r"\\end{table}")
+    return "\n".join(lines)
 
 def latex_table_dual_fused(agg: Dict[ConfigKey, ConfigAgg], include_weighted: bool = True) -> str:
     cols = r"c c c c c" if not include_weighted else r"c c c c c c"
@@ -678,9 +809,15 @@ def main():
     tables = []
     tables.append(latex_table_single_uav(agg))
     tables.append("")
+    tables.append(latex_table_single_uav_per_uav(agg))
+    tables.append("")
+    tables.append(latex_table_single_uav_pooled(agg))
+    tables.append("")
     tables.append(latex_table_dual_fused(agg, include_weighted=(not args.no_weighted)))
     tables.append("")
     tables.append(latex_table_fused_per_uav(agg))
+    tables.append("")
+    tables.append(latex_table_dual_fused_pooled(agg, include_weighted=(not args.no_weighted)))
     tables.append("")
     tables.append(latex_table_overall_by_angle(overall))
     tables.append("")

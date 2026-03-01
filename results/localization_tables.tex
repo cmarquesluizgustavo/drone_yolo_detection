@@ -1,0 +1,161 @@
+\begin{table}[h]
+\centering
+\caption{Single-UAV combined RMSE (meters) for ground-based and height-based approaches.}
+\label{tab:single_uav_combined_results}
+\begin{tabular}{c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Ground-based} & \textbf{Height-based} \\
+\midrule
+45$^\circ$ & 5\,m & 2\,m & \textbf{0.666} & 0.872 \\
+45$^\circ$ & 5\,m & 5\,m & \textbf{0.687} & 1.122 \\
+45$^\circ$ & 10\,m & 2\,m & \textbf{1.301} & 1.897 \\
+45$^\circ$ & 10\,m & 5\,m & 1.355 & \textbf{0.808} \\
+90$^\circ$ & 5\,m & 2\,m & \textbf{0.932} & 1.182 \\
+90$^\circ$ & 5\,m & 5\,m & 0.848 & \textbf{0.350} \\
+90$^\circ$ & 10\,m & 2\,m & \textbf{1.563} & 1.924 \\
+90$^\circ$ & 10\,m & 5\,m & 1.547 & \textbf{1.244} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{Single-UAV distance estimation RMSE (meters) for ground-plane and height-based approaches.}
+\label{tab:single_uav_results}
+\begin{tabular}{c c c cc cc}
+\toprule
+\multirow{2}{*}{\textbf{Angle}} &
+\multirow{2}{*}{\textbf{Distance}} &
+\multirow{2}{*}{\textbf{Height}} &
+\multicolumn{2}{c}{\textbf{Ground-based}} &
+\multicolumn{2}{c}{\textbf{Height-based}} \\
+\cmidrule(lr){4-5} \cmidrule(lr){6-7}
+ & & & \textbf{UAV 1} & \textbf{UAV 2} & \textbf{UAV 1} & \textbf{UAV 2} \\
+\midrule
+45$^\circ$ & 5\,m & 2\,m & 0.768 & \textbf{0.563} & 1.011 & \textbf{0.733} \\
+45$^\circ$ & 5\,m & 5\,m & 0.846 & \textbf{0.528} & \textbf{1.071} & 1.173 \\
+45$^\circ$ & 10\,m & 2\,m & 1.314 & \textbf{1.288} & 1.974 & \textbf{1.821} \\
+45$^\circ$ & 10\,m & 5\,m & \textbf{0.401} & 2.309 & \textbf{0.700} & 0.916 \\
+\midrule
+90$^\circ$ & 5\,m & 2\,m & \textbf{0.517} & 1.347 & \textbf{0.952} & 1.411 \\
+90$^\circ$ & 5\,m & 5\,m & 1.146 & \textbf{0.550} & \textbf{0.221} & 0.479 \\
+90$^\circ$ & 10\,m & 2\,m & \textbf{1.272} & 1.854 & 1.958 & \textbf{1.891} \\
+90$^\circ$ & 10\,m & 5\,m & \textbf{0.551} & 2.542 & 1.331 & \textbf{1.156} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{Single-UAV pooled RMSE (meters) for ground-based and height-based approaches.}
+\label{tab:single_uav_pooled_results}
+\begin{tabular}{c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Ground-based} & \textbf{Height-based} \\
+\midrule
+45$^\circ$ & 5\,m & 2\,m & \textbf{0.673} & 0.883 \\
+45$^\circ$ & 5\,m & 5\,m & \textbf{0.705} & 1.123 \\
+45$^\circ$ & 10\,m & 2\,m & \textbf{1.301} & 1.899 \\
+45$^\circ$ & 10\,m & 5\,m & 1.660 & \textbf{0.816} \\
+\midrule
+90$^\circ$ & 5\,m & 2\,m & \textbf{1.020} & 1.204 \\
+90$^\circ$ & 5\,m & 5\,m & 0.900 & \textbf{0.373} \\
+90$^\circ$ & 10\,m & 2\,m & \textbf{1.589} & 1.925 \\
+90$^\circ$ & 10\,m & 5\,m & 1.849 & \textbf{1.246} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{Dual-UAV fused localization RMSE (meters) using ray-intersection triangulation and coordinate averaging.}
+\label{tab:fused_results}
+\begin{tabular}{c c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Intersection} & \textbf{Average} \\
+\midrule
+45$^\circ$ & 5\,m & 2\,m & \textbf{0.467} & 0.482 \\
+45$^\circ$ & 5\,m & 5\,m & 0.502 & \textbf{0.405} \\
+45$^\circ$ & 10\,m & 2\,m & 1.457 & \textbf{0.859} \\
+45$^\circ$ & 10\,m & 5\,m & 3.556 & \textbf{0.736}\\
+\midrule
+90$^\circ$ & 5\,m & 2\,m & \textbf{0.361} & 0.477 \\
+90$^\circ$ & 5\,m & 5\,m & 1.026 & \textbf{0.414} \\
+90$^\circ$ & 10\,m & 2\,m & 1.428 & \textbf{0.806} \\
+90$^\circ$ & 10\,m & 5\,m & 1.240 & \textbf{1.191} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[t]
+\centering
+\caption{Fused Localization RMSE (meters).}
+\label{tab:fused_results_per_uav}
+\begin{tabular}{c c c cc cc}
+\toprule
+\multirow{2}{*}{\textbf{Angle}} & 
+\multirow{2}{*}{\textbf{Distance}} & 
+\multirow{2}{*}{\textbf{Height}} &
+\multicolumn{2}{c}{\textbf{Intersection}} &
+\multicolumn{2}{c}{\textbf{Average}} \
+\cmidrule(lr){4-5} \cmidrule(lr){6-7}
+ & & & \textbf{UAV1} & \textbf{UAV2} & \textbf{UAV1} & \textbf{UAV2} \\
+\midrule
+45$^\circ$ & 5 & 2 & \textbf{0.473} & 0.752 & \textbf{0.358} & 0.695 \\
+45$^\circ$ & 5 & 5 & 0.663 & \textbf{0.408} & \textbf{0.404} & 0.448 \\
+45$^\circ$ & 10 & 2 & \textbf{1.092} & 1.879 & 1.206 & \textbf{0.594} \\
+45$^\circ$ & 10 & 5 & 3.758 & \textbf{3.394} & 0.941 & \textbf{0.687} \\
+\midrule
+90$^\circ$ & 5 & 2 & \textbf{0.722} & 0.851 & \textbf{0.521} & 0.990 \\
+90$^\circ$ & 5 & 5 & \textbf{0.747} & 1.368 & \textbf{0.489} & 0.726 \\
+90$^\circ$ & 10 & 2 & \textbf{1.367} & 2.560 & 1.456 & \textbf{0.705} \\
+90$^\circ$ & 10 & 5 & \textbf{1.462} & 2.320 & \textbf{0.695} & 2.442 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{Dual-UAV pooled RMSE (meters) for fused localization (intersection, average, weighted average).}
+\label{tab:fused_pooled_results}
+\begin{tabular}{c c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Distance} & \textbf{Height} & \textbf{Intersection} & \textbf{Average} \\
+\midrule
+45$^\circ$ & 5\,m & 2\,m & 0.628 & \textbf{0.552}  \\
+45$^\circ$ & 5\,m & 5\,m & 0.550 & \textbf{0.426}  \\
+45$^\circ$ & 10\,m & 2\,m & 1.536 & \textbf{0.951} \\
+45$^\circ$ & 10\,m & 5\,m & 3.581 & \textbf{0.824} \\
+90$^\circ$ & 5\,m & 2\,m & \textbf{0.790} & 0.791  \\
+90$^\circ$ & 5\,m & 5\,m & 1.102 & \textbf{0.619}  \\
+90$^\circ$ & 10\,m & 2\,m & 2.052 & \textbf{1.144} \\
+90$^\circ$ & 10\,m & 5\,m & 1.939 & \textbf{1.795} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+
+\begin{table}[h]
+\centering
+\caption{Overall localization RMSE comparison across estimation and fusion strategies (meters).}
+\label{tab:rmse_final_comparison_by_angle}
+\begin{tabular}{c c c c c c}
+\toprule
+\textbf{Angle} & \textbf{Height-based} & \textbf{Ground-based} & \textbf{Intersection} & \textbf{Average} \\
+\midrule
+45$^\circ$ & 1.256 & 0.972 & 1.833 & \textbf{0.642} \\
+90$^\circ$ & 1.285 & 1.138 & 1.080 & \textbf{0.753} \\
+\bottomrule
+\end{tabular}
+\end{table}

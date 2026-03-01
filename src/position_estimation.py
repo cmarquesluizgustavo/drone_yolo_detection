@@ -60,9 +60,17 @@ def _target_xy(camera, dist, bearing):
 def fuse_avg_position_from_distance_bearing(camera1, dist1, bearing1, camera2, dist2, bearing2):
     p1 = _target_xy(camera1, dist1, bearing1)
     p2 = _target_xy(camera2, dist2, bearing2)
-    xt = (p1[0] + p2[0]) / 2.0
-    yt = (p1[1] + p2[1]) / 2.0
-    return GeoConverter.xy_to_geo(xt, yt)
+
+    w1, w2 = weight_function(1,1)
+
+    x = (w1*p1[0] + w2*p2[0]) / (w1 + w2)
+    y = (w1*p1[1] + w2*p2[1]) / (w1 + w2)
+
+    return GeoConverter.xy_to_geo(x, y)
+
+def weight_function(a,b):
+    #INSER HERE THE WEIGHT FUNCTION
+    return a, b
 
 def fuse_triangulate_position_from_bearing_intersection(camera1, bearing1, camera2, bearing2):
     x1, y1 = GeoConverter.geo_to_xy(camera1.lat, camera1.lon)
